@@ -17,13 +17,7 @@ export const staffController = {
                 include: {
                     programs: {
                         include: {
-                            pengadaan: {
-                                include: {
-                                    progresTahapan: {
-                                        select: { status: true }
-                                    }
-                                }
-                            }
+                            pengadaan: { select: { id: true } }
                         }
                     }
                 },
@@ -34,30 +28,12 @@ export const staffController = {
 
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
-                let completedPrograms = 0;
+
+                let prioritasAktif = 0;
 
                 dinas.programs.forEach(program => {
-                    if (program.pengadaan.length === 0) return;
-
-                    let isProgramCompleted = true;
-                    let hasAnyTahapan = false;
-
-                    for (const transaksi of program.pengadaan) {
-                        if (transaksi.progresTahapan.length > 0) {
-                            hasAnyTahapan = true;
-                        }
-
-                        for (const progres of transaksi.progresTahapan) {
-                            if (progres.status !== 'COMPLETED') {
-                                isProgramCompleted = false;
-                                break;
-                            }
-                        }
-                        if (!isProgramCompleted) break; 
-                    }
-
-                    if (isProgramCompleted && hasAnyTahapan) {
-                        completedPrograms++;
+                    if (program.isPrioritas === true && program.pengadaan.length > 0) {
+                        prioritasAktif++;
                     }
                 });
 
@@ -65,7 +41,7 @@ export const staffController = {
                     id: dinas.id,
                     namaDinas: dinas.namaDinas,
                     totalProgram: totalPrograms,
-                    programSelesai: completedPrograms
+                    programPrioritas: prioritasAktif
                 };
             });
 
