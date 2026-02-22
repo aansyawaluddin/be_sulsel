@@ -38,9 +38,13 @@ export const staffController = {
 
             const result = await prisma.$transaction(async (tx) => {
 
+                const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+                const slugUnik = `${baseSlug}`;
+
                 const programBaru = await tx.program.create({
                     data: {
                         namaProgram,
+                        slug: slugUnik,
                         anggaran: BigInt(anggaran),
                         dinasId: dinasId
                     }
@@ -81,7 +85,7 @@ export const staffController = {
                             tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + tahapan.standarWaktuHari);
 
                             estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
-                        }
+                        } 
                         else {
                             tanggalSelesaiSekarang = null;
                             estimasiTanggalMulai = null;
@@ -101,24 +105,15 @@ export const staffController = {
                     }
                 }
 
-                return await tx.program.findUnique({
-                    where: { id: programBaru.id },
-                    include: {
-                        pengadaan: {
-                            include: {
-                                pengadaan: true,
-                                progresTahapan: {
-                                    include: { tahapan: true },
-                                    orderBy: { tahapan: { noUrut: 'asc' } }
-                                }
-                            }
-                        }
-                    }
-                });
+                return {
+                    id: programBaru.id,
+                    namaProgram: programBaru.namaProgram,
+                    slug: programBaru.slug
+                };
             });
 
             res.status(201).json({
-                msg: "Program dan penjadwalan Tahapan berhasil dibuat secara otomatis!",
+                msg: "Program dan seluruh jadwal pengadaan berhasil dibuat!",
                 data: result
             });
 
@@ -128,50 +123,89 @@ export const staffController = {
         }
     },
 
-    updateProgresTahapan: async (req, res) => {
+    getProgram: async (req, res) => {
         try {
-            const { progresId } = req.params;
-            const { status, waktuAktualHari, tanggalMulai, tanggalSelesai, dokumenBuktiUrl } = req.body;
+            const dinasId = req.user.dinasId;
+            const role = req.user.role;
 
-
-            const progresEksis = await prisma.progresTahapan.findUnique({
-                where: { id: parseInt(progresId) },
-                include: { tahapan: true }
-            });
-
-            if (!progresEksis) {
-                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            const filter = {};
+            if (role === 'STAFF') {
+                filter.dinasId = dinasId;
             }
 
-            const dataUpdate = {};
-
-            if (status) dataUpdate.status = status;
-            if (tanggalMulai) dataUpdate.tanggalMulai = new Date(tanggalMulai);
-            if (tanggalSelesai) dataUpdate.tanggalSelesai = new Date(tanggalSelesai);
-            if (dokumenBuktiUrl) dataUpdate.dokumenBuktiUrl = dokumenBuktiUrl;
-
-
-            if (waktuAktualHari !== undefined) {
-                if (progresEksis.tahapan.isWaktuEditable) {
-                    dataUpdate.waktuAktualHari = parseInt(waktuAktualHari);
-                } else {
-                    console.log(`⚠️ Waktu aktual diabaikan karena tahapan '${progresEksis.tahapan.namaTahapan}' tidak editable.`);
+            const programList = await prisma.program.findMany({
+                where: filter,
+                select: {
+                    id: true,
+                    namaProgram: true,
+                    slug: true,
+                    anggaran: true,
+                    createdAt: true,
+                    dinas: {
+                        select: { namaDinas: true }
+                    },
+                },
+                orderBy: {
+                    createdAt: 'desc' 
                 }
-            }
-
-            const progresDiupdate = await prisma.progresTahapan.update({
-                where: { id: parseInt(progresId) },
-                data: dataUpdate
             });
 
             res.status(200).json({
-                msg: `Berhasil mengupdate status tahapan menjadi ${progresDiupdate.status}`,
-                data: progresDiupdate
+                msg: "Berhasil mengambil daftar program",
+                data: programList
             });
 
         } catch (error) {
-            console.error(`🔥 [UPDATE PROGRES ERROR]:`, error);
+            console.error(`🔥 [GET PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
-    }
+    },
+
+    getDetailProgram: async (req, res) => {
+        try {
+            const { slug } = req.params;
+            const dinasId = req.user.dinasId;
+            const role = req.user.role;
+
+            const filter = { slug: slug };
+            if (role === 'staff') {
+                filter.dinasId = dinasId;
+            }
+
+            const detailProgram = await prisma.program.findFirst({
+                where: filter,
+                include: {
+                    dinas: {
+                        select: { namaDinas: true }
+                    },
+                    pengadaan: { 
+                        include: {
+                            pengadaan: { 
+                                select: { namaPengadaan: true }
+                            },
+                            progresTahapan: {
+                                include: { tahapan: true },
+                                orderBy: { tahapan: { noUrut: 'asc' } }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!detailProgram) {
+                return res.status(404).json({ 
+                    msg: "Program tidak ditemukan atau Anda tidak memiliki hak akses untuk melihat program ini." 
+                });
+            }
+
+            res.status(200).json({
+                msg: "Berhasil mengambil detail informasi program",
+                data: detailProgram
+            });
+
+        } catch (error) {
+            console.error(`🔥 [GET DETAIL PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
 };

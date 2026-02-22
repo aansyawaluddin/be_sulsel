@@ -7,10 +7,16 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(verifyProgramAccess);
 
+// List Program
+router.get('/program', staffController.getProgram);
+
 // DropDown Pengadaan
 router.get('/pengadaan', staffController.getPengadaan);
 
 // Buat Program
 router.post('/program', staffController.createProgram);
+
+// Detail Program
+router.get('/program/:slug', staffController.getDetailProgram);
 
 export default router;

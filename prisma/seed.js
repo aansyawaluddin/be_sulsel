@@ -218,13 +218,13 @@ async function main() {
                 username: 'gubernur_sulsel',
                 password: hashPassword,
                 name: 'Bapak Gubernur',
-                role: 'GUBERNUR'
+                role: 'gubernur'
             },
             {
                 username: 'staff_diskominfo',
                 password: hashPassword,
                 name: 'Staff Admin Diskominfo',
-                role: 'STAFF',
+                role: 'staff',
                 dinasId: d.id
             }
         ]

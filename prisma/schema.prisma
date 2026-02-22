@@ -8,8 +8,8 @@ datasource db {
 }
 
 enum Role {
-  GUBERNUR
-  STAFF
+  gubernur
+  staff
 }
 
 enum StatusTahapan {
@@ -74,6 +74,7 @@ model Dinas {
 model Program {
   id          Int                  @id @default(autoincrement()) 
   namaProgram String               @map("nama_program")
+  slug        String               @unique
   anggaran    BigInt              
   
   dinasId     Int                  @map("dinas_id")
@@ -158,7 +159,9 @@ model ProgresTahapan {
   tanggalMulai    DateTime?          @map("tanggal_mulai")
   tanggalSelesai  DateTime?          @map("tanggal_selesai")
   
-  dokumenBuktiUrl String?            @map("dokumen_bukti_url")
+  dokumenBukti String?            @map("dokumen_bukti")
+  
+  keterangan      String?            @db.Text
 
   updatedAt       DateTime           @updatedAt @map("updated_at")
 

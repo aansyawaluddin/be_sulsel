@@ -32,7 +32,7 @@ export const verifyToken = async (req, res, next) => {
 };
 
 export const verifyGovernor = (req, res, next) => {
-    if (req.user.role !== 'GUBERNUR') {
+    if (req.user.role !== 'gubernur') {
         return res.status(403).json({
             msg: "Akses Terlarang: Fitur ini khusus untuk Gubernur."
         });
@@ -41,7 +41,7 @@ export const verifyGovernor = (req, res, next) => {
 };
 
 export const verifyProgramAccess = (req, res, next) => {
-    const allowedRoles = ['GUBERNUR', 'STAFF'];
+    const allowedRoles = ['gubernur', 'staff'];
 
     if (!allowedRoles.includes(req.user.role)) {
         return res.status(403).json({ msg: "Akses Terlarang" });
