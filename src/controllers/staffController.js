@@ -2,6 +2,84 @@ import prisma from '../utils/prisma.js';
 
 export const staffController = {
 
+    getDinas: async (req, res) => {
+        try {
+            const role = req.user.role;
+            const dinasId = req.user.dinasId;
+
+            const filterDinas = {};
+            if (role === 'staff') {
+                filterDinas.id = dinasId;
+            }
+
+            const dinasList = await prisma.dinas.findMany({
+                where: filterDinas,
+                include: {
+                    programs: {
+                        include: {
+                            pengadaan: {
+                                include: {
+                                    progresTahapan: {
+                                        select: { status: true }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    namaDinas: 'asc'
+                }
+            });
+
+            const formattedDinas = dinasList.map(dinas => {
+                const totalPrograms = dinas.programs.length;
+                let completedPrograms = 0;
+
+                dinas.programs.forEach(program => {
+                    if (program.pengadaan.length === 0) return;
+
+                    let isProgramCompleted = true;
+                    let hasAnyTahapan = false;
+
+                    for (const transaksi of program.pengadaan) {
+                        if (transaksi.progresTahapan.length > 0) {
+                            hasAnyTahapan = true;
+                        }
+
+                        for (const progres of transaksi.progresTahapan) {
+                            if (progres.status !== 'COMPLETED') {
+                                isProgramCompleted = false;
+                                break;
+                            }
+                        }
+                        if (!isProgramCompleted) break; 
+                    }
+
+                    if (isProgramCompleted && hasAnyTahapan) {
+                        completedPrograms++;
+                    }
+                });
+
+                return {
+                    id: dinas.id,
+                    namaDinas: dinas.namaDinas,
+                    totalProgram: totalPrograms,
+                    programSelesai: completedPrograms
+                };
+            });
+
+            res.status(200).json({
+                msg: "Berhasil mengambil data instansi/dinas",
+                data: formattedDinas
+            });
+
+        } catch (error) {
+            console.error(`🔥 [GET DINAS ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     getPengadaan: async (req, res) => {
         try {
             const pengadaanList = await prisma.pengadaan.findMany({
@@ -85,7 +163,7 @@ export const staffController = {
                             tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + tahapan.standarWaktuHari);
 
                             estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
-                        } 
+                        }
                         else {
                             tanggalSelesaiSekarang = null;
                             estimasiTanggalMulai = null;
@@ -94,7 +172,7 @@ export const staffController = {
                         dataProgres.push({
                             transaksiId: transaksi.id,
                             tahapanId: tahapan.id,
-                            status: 'PENDING',
+                            status: 'on_progress',
                             tanggalMulai: tanggalMulaiSekarang,
                             tanggalSelesai: tanggalSelesaiSekarang
                         });
@@ -129,7 +207,7 @@ export const staffController = {
             const role = req.user.role;
 
             const filter = {};
-            if (role === 'STAFF') {
+            if (role === 'staff') {
                 filter.dinasId = dinasId;
             }
 
@@ -146,7 +224,7 @@ export const staffController = {
                     },
                 },
                 orderBy: {
-                    createdAt: 'desc' 
+                    createdAt: 'desc'
                 }
             });
 
@@ -178,9 +256,9 @@ export const staffController = {
                     dinas: {
                         select: { namaDinas: true }
                     },
-                    pengadaan: { 
+                    pengadaan: {
                         include: {
-                            pengadaan: { 
+                            pengadaan: {
                                 select: { namaPengadaan: true }
                             },
                             progresTahapan: {
@@ -193,8 +271,8 @@ export const staffController = {
             });
 
             if (!detailProgram) {
-                return res.status(404).json({ 
-                    msg: "Program tidak ditemukan atau Anda tidak memiliki hak akses untuk melihat program ini." 
+                return res.status(404).json({
+                    msg: "Program tidak ditemukan atau Anda tidak memiliki hak akses untuk melihat program ini."
                 });
             }
 

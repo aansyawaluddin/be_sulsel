@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import prisma from '../utils/prisma.js'; 
+import prisma from '../utils/prisma.js';
 
 export const verifyToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -41,13 +41,13 @@ export const verifyGovernor = (req, res, next) => {
 };
 
 export const verifyProgramAccess = (req, res, next) => {
-    const allowedRoles = ['gubernur', 'staff'];
+    const allowedRoles = ['gubernur', 'staff', 'staff_master'];
 
     if (!allowedRoles.includes(req.user.role)) {
         return res.status(403).json({ msg: "Akses Terlarang" });
     }
 
-    if (req.user.role === 'GUBERNUR') return next();
+    if (req.user.role === 'gubernur') return next();
 
     if (!req.user.dinasId) {
         return res.status(403).json({ msg: "Anda belum ditugaskan ke Dinas manapun." });

@@ -10,12 +10,12 @@ datasource db {
 enum Role {
   gubernur
   staff
+  staff_master
 }
 
 enum StatusTahapan {
-  PENDING
-  ON_PROGRESS
-  COMPLETED
+  on_progress
+  selesai
 }
 
 // =========================================
@@ -76,6 +76,7 @@ model Program {
   namaProgram String               @map("nama_program")
   slug        String               @unique
   anggaran    BigInt              
+  isPrioritas Boolean              @default(false) @map("is_prioritas")
   
   dinasId     Int                  @map("dinas_id")
   dinas       Dinas                @relation(fields: [dinasId], references: [id])
@@ -152,7 +153,7 @@ model ProgresTahapan {
   tahapanId       Int                @map("tahapan_id")
   tahapan         Tahapan            @relation(fields: [tahapanId], references: [id])
   
-  status          StatusTahapan      @default(PENDING)
+  status          StatusTahapan      @default(on_progress)
   
   waktuAktualHari Int?               @map("waktu_aktual_hari")
   

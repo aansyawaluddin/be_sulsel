@@ -185,17 +185,16 @@ async function main() {
     await prisma.$executeRaw`TRUNCATE TABLE dinas;`;
     await prisma.$executeRaw`SET FOREIGN_KEY_CHECKS = 1;`;
 
-    console.log('🚀 Memulai seeding data baru...');
+    console.log('🚀 Memulai seeding data Pengadaan & Tahapan...');
 
     for (const master of dataPatenPengadaan) {
         const p = await prisma.pengadaan.create({
             data: { namaPengadaan: master.namaPengadaan }
         });
-        console.log(`✅ Master: ${p.namaPengadaan} (ID: ${p.id})`);
 
         const listTahapan = master.tahapan.map((t, index) => ({
             pengadaanId: p.id,
-            noUrut: index + 1, 
+            noUrut: index + 1,
             namaTahapan: t.nama,
             standarWaktuHari: t.waktu.toLowerCase() === 'editable' ? null : parseInt(t.waktu),
             isWaktuEditable: t.waktu.toLowerCase() === 'editable',
@@ -205,9 +204,14 @@ async function main() {
         await prisma.tahapan.createMany({ data: listTahapan });
     }
 
-    const d = await prisma.dinas.create({
-        data: { namaDinas: "Dinas Komunikasi dan Informatika" }
-    });
+    console.log('🏢 Memulai seeding data Dinas...');
+
+    const dinas1 = await prisma.dinas.create({ data: { namaDinas: "Dinas Pendidikan" } });
+    const dinas2 = await prisma.dinas.create({ data: { namaDinas: "Dinas Perhubungan" } });
+    const dinas3 = await prisma.dinas.create({ data: { namaDinas: "Dinas Pekerjaan Umum (PU)" } });
+    const dinas4 = await prisma.dinas.create({ data: { namaDinas: "Dinas Komunikasi dan Informatika" } });
+
+    console.log('👤 Memulai seeding data User...');
 
     const salt = await bcrypt.genSalt(10);
     const hashPassword = await bcrypt.hash('123', salt);
@@ -221,17 +225,44 @@ async function main() {
                 role: 'gubernur'
             },
             {
+                username: 'staff_master_admin',
+                password: hashPassword,
+                name: 'Staff Master Administrator',
+                role: 'staff_master'
+            },
+            {
+                username: 'staff_pendidikan',
+                password: hashPassword,
+                name: 'Staff Admin Pendidikan',
+                role: 'staff',
+                dinasId: dinas1.id
+            },
+            {
+                username: 'staff_perhubungan',
+                password: hashPassword,
+                name: 'Staff Admin Perhubungan',
+                role: 'staff',
+                dinasId: dinas2.id
+            },
+            {
+                username: 'staff_pu',
+                password: hashPassword,
+                name: 'Staff Admin PU',
+                role: 'staff',
+                dinasId: dinas3.id
+            },
+            {
                 username: 'staff_diskominfo',
                 password: hashPassword,
                 name: 'Staff Admin Diskominfo',
                 role: 'staff',
-                dinasId: d.id
+                dinasId: dinas4.id
             }
         ]
     });
 
-    console.log('👤 Akun Created: gubernur_sulsel & staff_diskominfo (Password: 123)');
-    console.log('🎉 Selesai! ID sekarang mulai dari 1 dan data sudah rapi.');
+    console.log('✅ Semua data User & Dinas berhasil di-seed (Password: 123)');
+    console.log('🎉 Selesai! Database siap digunakan.');
 }
 
 main()

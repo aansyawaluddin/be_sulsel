@@ -7,6 +7,9 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(verifyProgramAccess);
 
+// Dinas
+router.get('/dinas', staffController.getDinas);
+
 // List Program
 router.get('/program', staffController.getProgram);
 
