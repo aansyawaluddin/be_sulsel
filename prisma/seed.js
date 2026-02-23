@@ -206,10 +206,18 @@ async function main() {
 
     console.log('🏢 Memulai seeding data Dinas...');
 
-    const dinas1 = await prisma.dinas.create({ data: { namaDinas: "Dinas Pendidikan" } });
-    const dinas2 = await prisma.dinas.create({ data: { namaDinas: "Dinas Perhubungan" } });
-    const dinas3 = await prisma.dinas.create({ data: { namaDinas: "Dinas Pekerjaan Umum (PU)" } });
-    const dinas4 = await prisma.dinas.create({ data: { namaDinas: "Dinas Komunikasi dan Informatika" } });
+    const dinas1 = await prisma.dinas.create({
+        data: { namaDinas: "Dinas Pendidikan", slug: "dinas-pendidikan" }
+    });
+    const dinas2 = await prisma.dinas.create({
+        data: { namaDinas: "Dinas Perhubungan", slug: "dinas-perhubungan" }
+    });
+    const dinas3 = await prisma.dinas.create({
+        data: { namaDinas: "Dinas Pekerjaan Umum (PU)", slug: "dinas-pekerjaan-umum-pu" }
+    });
+    const dinas4 = await prisma.dinas.create({
+        data: { namaDinas: "Dinas Komunikasi dan Informatika", slug: "dinas-komunikasi-dan-informatika" }
+    });
 
     console.log('👤 Memulai seeding data User...');
 

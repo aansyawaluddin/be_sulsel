@@ -61,5 +61,33 @@ export const authController = {
             console.error(`🔥 [LOGIN ERROR]:`, error);
             res.status(500).json({ msg: error.message });
         }
+    },
+
+    logout: async (req, res) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(204).send();
+            }
+
+            await prisma.accessToken.deleteMany({
+                where: {
+                    token: refreshToken
+                }
+            });
+
+            res.clearCookie('refreshToken', {
+                httpOnly: true,
+            });
+
+            console.log(`✅ [LOGOUT SUCCESS] Token berhasil dihapus`);
+
+            res.status(200).json({ msg: "Berhasil logout" });
+
+        } catch (error) {
+            console.error(`🔥 [LOGOUT ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
     }
 };

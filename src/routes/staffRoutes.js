@@ -8,7 +8,7 @@ router.use(verifyToken);
 router.use(verifyProgramAccess);
 
 // Dinas
-router.get('/dinas', staffController.getDinas);
+router.get('/dinas/:slug', staffController.getDinas);
 
 // List Program
 router.get('/program', staffController.getProgram);

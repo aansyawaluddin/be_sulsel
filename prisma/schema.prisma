@@ -61,6 +61,7 @@ model AccessToken {
 model Dinas {
   id        Int       @id @default(autoincrement()) 
   namaDinas String    @unique @map("nama_dinas")
+  slug      String    @unique
   
   users     User[]
   programs  Program[]
