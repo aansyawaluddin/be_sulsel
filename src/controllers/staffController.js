@@ -4,17 +4,15 @@ export const staffController = {
 
     getDinas: async (req, res) => {
         try {
-            const { slug } = req.params;
             const role = req.user.role;
             const dinasId = req.user.dinasId;
 
-            const filterDinas = { slug: slug };
-
+            const filterDinas = {};
             if (role === 'staff') {
                 filterDinas.id = dinasId;
             }
 
-            const dinasData = await prisma.dinas.findFirst({
+            const dinasList = await prisma.dinas.findMany({
                 where: filterDinas,
                 include: {
                     programs: {
@@ -22,29 +20,31 @@ export const staffController = {
                             pengadaan: { select: { id: true } }
                         }
                     }
+                },
+                orderBy: {
+                    namaDinas: 'asc'
                 }
             });
 
-            if (!dinasData) {
-                return res.status(404).json({ msg: "Data instansi tidak ditemukan atau akses ditolak" });
-            }
+            const formattedDinas = dinasList.map(dinas => {
+                const totalPrograms = dinas.programs.length;
 
-            const totalPrograms = dinasData.programs.length;
-            let prioritasAktif = 0;
+                let prioritasAktif = 0;
 
-            dinasData.programs.forEach(program => {
-                if (program.isPrioritas === true && program.pengadaan.length > 0) {
-                    prioritasAktif++;
-                }
+                dinas.programs.forEach(program => {
+                    if (program.isPrioritas === true && program.pengadaan.length > 0) {
+                        prioritasAktif++;
+                    }
+                });
+
+                return {
+                    id: dinas.id,
+                    namaDinas: dinas.namaDinas,
+                    slug : dinas.slug,
+                    totalProgram: totalPrograms,
+                    programPrioritas: prioritasAktif
+                };
             });
-
-            const formattedDinas = {
-                id: dinasData.id,
-                namaDinas: dinasData.namaDinas,
-                slug: dinasData.slug,
-                totalProgram: totalPrograms,
-                programPrioritas: prioritasAktif
-            };
 
             res.status(200).json({
                 msg: "Berhasil mengambil data instansi/dinas",

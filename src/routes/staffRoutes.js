@@ -8,10 +8,10 @@ router.use(verifyToken);
 router.use(verifyProgramAccess);
 
 // Dinas
-router.get('/dinas/:slug', staffController.getDinas);
+router.get('/dinas', staffController.getDinas);
 
 // List Program
-router.get('/program', staffController.getProgram);
+router.get('/:slug/program', staffController.getProgram);
 
 // DropDown Pengadaan
 router.get('/pengadaan', staffController.getPengadaan);
