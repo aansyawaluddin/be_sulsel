@@ -113,7 +113,7 @@ export const staffController = {
 
                     const transaksi = await tx.transaksiPengadaan.create({
                         data: {
-                            namaTransaksi: `Pengadaan ${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
+                            namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
                             programId: programBaru.id,
                             pengadaanId: masterPengadaan.id
                         }
@@ -195,18 +195,35 @@ export const staffController = {
                     slug: true,
                     anggaran: true,
                     createdAt: true,
-                    dinas: {
-                        select: { namaDinas: true }
-                    },
+                    pengadaan: {
+                        select: {
+                            pengadaan: {
+                                select: {
+                                    namaPengadaan: true
+                                }
+                            }
+                        }
+                    }
                 },
                 orderBy: {
                     createdAt: 'desc'
                 }
             });
 
+            const formattedPrograms = programList.map(program => {
+                return {
+                    id: program.id,
+                    namaProgram: program.namaProgram,
+                    slug: program.slug,
+                    anggaran: program.anggaran,
+                    createdAt: program.createdAt,
+                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
+                };
+            });
+
             res.status(200).json({
                 msg: "Berhasil mengambil daftar program",
-                data: programList
+                data: formattedPrograms
             });
 
         } catch (error) {
