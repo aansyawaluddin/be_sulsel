@@ -40,7 +40,7 @@ export const staffController = {
                 return {
                     id: dinas.id,
                     namaDinas: dinas.namaDinas,
-                    slug : dinas.slug,
+                    slug: dinas.slug,
                     totalProgram: totalPrograms,
                     programPrioritas: prioritasAktif
                 };
@@ -150,8 +150,8 @@ export const staffController = {
                             transaksiId: transaksi.id,
                             tahapanId: tahapan.id,
                             status: 'on_progress',
-                            tanggalMulai: tanggalMulaiSekarang,
-                            tanggalSelesai: tanggalSelesaiSekarang
+                            planningTanggalMulai: tanggalMulaiSekarang,
+                            planningTanggalSelesai: tanggalSelesaiSekarang
                         });
                     }
 
@@ -178,12 +178,15 @@ export const staffController = {
         }
     },
 
+
     getProgram: async (req, res) => {
         try {
+            const { slug } = req.params;
             const dinasId = req.user.dinasId;
             const role = req.user.role;
 
-            const filter = {};
+            const filter = { dinas: { slug: slug } };
+
             if (role === 'staff') {
                 filter.dinasId = dinasId;
             }
@@ -250,13 +253,17 @@ export const staffController = {
                     dinas: {
                         select: { namaDinas: true }
                     },
+                    dokumen: true,
                     pengadaan: {
                         include: {
                             pengadaan: {
                                 select: { namaPengadaan: true }
                             },
                             progresTahapan: {
-                                include: { tahapan: true },
+                                include: {
+                                    tahapan: true,
+                                    dokumen: true
+                                },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
                         }
@@ -270,9 +277,45 @@ export const staffController = {
                 });
             }
 
+            const formattedDetail = {
+                id: detailProgram.id,
+                namaProgram: detailProgram.namaProgram,
+                slug: detailProgram.slug,
+                anggaran: detailProgram.anggaran,
+                isPrioritas: detailProgram.isPrioritas,
+                createdAt: detailProgram.createdAt,
+                dinas: detailProgram.dinas,
+                dokumenProgram: detailProgram.dokumen,
+                pengadaanList: detailProgram.pengadaan.map(transaksi => ({
+                    id: transaksi.id,
+                    namaTransaksi: transaksi.namaTransaksi,
+                    jenisPengadaan: transaksi.pengadaan.namaPengadaan,
+                    createdAt: transaksi.createdAt,
+                    tahapanList: transaksi.progresTahapan.map(p => ({
+                        idTahapan: p.tahapan.id,
+                        noUrut: p.tahapan.noUrut,
+                        namaTahapan: p.tahapan.namaTahapan,
+                        standarWaktuHari: p.tahapan.standarWaktuHari,
+                        isWaktuEditable: p.tahapan.isWaktuEditable,
+                        bobot: p.tahapan.bobot,
+                        progres: {
+                            idProgres: p.id,
+                            status: p.status,
+                            planningTanggalMulai: p.planningTanggalMulai,
+                            planningTanggalSelesai: p.planningTanggalSelesai,
+                            aktualTanggalMulai: p.aktualTanggalMulai,
+                            aktualTanggalSelesai: p.aktualTanggalSelesai,
+                            keterangan: p.keterangan,
+                            dokumenBukti: p.dokumen || [],
+                            updatedAt: p.updatedAt
+                        }
+                    }))
+                }))
+            };
+
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program",
-                data: detailProgram
+                data: formattedDetail
             });
 
         } catch (error) {

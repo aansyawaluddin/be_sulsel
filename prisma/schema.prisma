@@ -161,26 +161,27 @@ model TransaksiPengadaan {
 }
 
 model ProgresTahapan {
-  id              Int                     @id @default(autoincrement()) 
+  id                     Int                    @id @default(autoincrement()) 
   
-  transaksiId     Int                     @map("transaksi_id")
-  transaksi       TransaksiPengadaan      @relation(fields: [transaksiId], references: [id])
+  transaksiId            Int                    @map("transaksi_id")
+  transaksi              TransaksiPengadaan     @relation(fields: [transaksiId], references: [id])
   
-  tahapanId       Int                     @map("tahapan_id")
-  tahapan         Tahapan                 @relation(fields: [tahapanId], references: [id])
+  tahapanId              Int                    @map("tahapan_id")
+  tahapan                Tahapan                @relation(fields: [tahapanId], references: [id])
   
-  status          StatusTahapan           @default(on_progress)
+  status                 StatusTahapan          @default(on_progress)
   
-  waktuAktualHari Int?                    @map("waktu_aktual_hari")
+  planningTanggalMulai   DateTime?              @map("planning_tanggal_mulai")
+  planningTanggalSelesai DateTime?              @map("planning_tanggal_selesai")
   
-  tanggalMulai    DateTime?               @map("tanggal_mulai")
-  tanggalSelesai  DateTime?               @map("tanggal_selesai")
+  aktualTanggalMulai     DateTime?              @map("aktual_tanggal_mulai")
+  aktualTanggalSelesai   DateTime?              @map("aktual_tanggal_selesai")
   
-  keterangan      String?                 @db.Text
+  keterangan             String?                @db.Text
   
-  dokumen         DokumenProgresTahapan[] 
+  dokumen                DokumenProgresTahapan[] 
 
-  updatedAt       DateTime                @updatedAt @map("updated_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
 
   @@unique([transaksiId, tahapanId]) 
   @@map("progres_tahapan")
