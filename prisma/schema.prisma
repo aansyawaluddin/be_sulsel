@@ -55,7 +55,7 @@ model AccessToken {
 }
 
 // =========================================
-// ENTITAS ORGANISASI
+// ENTITAS ORGANISASI & PROGRAM
 // =========================================
 
 model Dinas {
@@ -76,18 +76,33 @@ model Program {
   id          Int                  @id @default(autoincrement()) 
   namaProgram String               @map("nama_program")
   slug        String               @unique
-  anggaran    BigInt              
+  anggaran    BigInt               
   isPrioritas Boolean              @default(false) @map("is_prioritas")
   
   dinasId     Int                  @map("dinas_id")
   dinas       Dinas                @relation(fields: [dinasId], references: [id])
   
   pengadaan   TransaksiPengadaan[]
+  dokumen     DokumenProgram[]     
   
   createdAt   DateTime             @default(now()) @map("created_at")
   updatedAt   DateTime             @updatedAt @map("updated_at")
 
   @@map("programs")
+}
+
+model DokumenProgram {
+  id          Int      @id @default(autoincrement())
+  
+  programId   Int      @map("program_id")
+  program     Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  
+  namaFile    String   @map("nama_file")
+  fileUrl     String   @map("file_url")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("dokumen_program")
 }
 
 // =========================================
@@ -128,45 +143,59 @@ model Tahapan {
 // =========================================
 
 model TransaksiPengadaan {
-  id             Int               @id @default(autoincrement()) 
-  namaTransaksi  String            @map("nama_transaksi")
+  id             Int              @id @default(autoincrement()) 
+  namaTransaksi  String           @map("nama_transaksi")
   
-  programId      Int               @map("program_id")
-  program        Program           @relation(fields: [programId], references: [id])
+  programId      Int              @map("program_id")
+  program        Program          @relation(fields: [programId], references: [id])
   
-  pengadaanId    Int               @map("pengadaan_id")
-  pengadaan      Pengadaan         @relation(fields: [pengadaanId], references: [id])
+  pengadaanId    Int              @map("pengadaan_id")
+  pengadaan      Pengadaan        @relation(fields: [pengadaanId], references: [id])
   
   progresTahapan ProgresTahapan[]
   
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
 
   @@map("transaksi_pengadaan")
 }
 
 model ProgresTahapan {
-  id              Int                @id @default(autoincrement()) 
+  id              Int                     @id @default(autoincrement()) 
   
-  transaksiId     Int                @map("transaksi_id")
-  transaksi       TransaksiPengadaan @relation(fields: [transaksiId], references: [id])
+  transaksiId     Int                     @map("transaksi_id")
+  transaksi       TransaksiPengadaan      @relation(fields: [transaksiId], references: [id])
   
-  tahapanId       Int                @map("tahapan_id")
-  tahapan         Tahapan            @relation(fields: [tahapanId], references: [id])
+  tahapanId       Int                     @map("tahapan_id")
+  tahapan         Tahapan                 @relation(fields: [tahapanId], references: [id])
   
-  status          StatusTahapan      @default(on_progress)
+  status          StatusTahapan           @default(on_progress)
   
-  waktuAktualHari Int?               @map("waktu_aktual_hari")
+  waktuAktualHari Int?                    @map("waktu_aktual_hari")
   
-  tanggalMulai    DateTime?          @map("tanggal_mulai")
-  tanggalSelesai  DateTime?          @map("tanggal_selesai")
+  tanggalMulai    DateTime?               @map("tanggal_mulai")
+  tanggalSelesai  DateTime?               @map("tanggal_selesai")
   
-  dokumenBukti String?            @map("dokumen_bukti")
+  keterangan      String?                 @db.Text
   
-  keterangan      String?            @db.Text
+  dokumen         DokumenProgresTahapan[] 
 
-  updatedAt       DateTime           @updatedAt @map("updated_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
 
   @@unique([transaksiId, tahapanId]) 
   @@map("progres_tahapan")
+}
+
+model DokumenProgresTahapan {
+  id               Int            @id @default(autoincrement())
+  
+  progresTahapanId Int            @map("progres_tahapan_id")
+  progresTahapan   ProgresTahapan @relation(fields: [progresTahapanId], references: [id], onDelete: Cascade)
+  
+  namaFile         String         @map("nama_file")
+  fileUrl          String         @map("file_url")
+  
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  @@map("dokumen_progres_tahapan")
 }
