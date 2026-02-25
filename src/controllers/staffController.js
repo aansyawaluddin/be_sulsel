@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import prisma from '../utils/prisma.js';
 
 export const staffController = {
@@ -362,6 +364,144 @@ export const staffController = {
 
         } catch (error) {
             console.error(`🔥 [UPDATE PLANNING ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    updateAktualTahapan: async (req, res) => {
+        try {
+            const { progresId } = req.params;
+
+            const {
+                aktualTanggalMulai,
+                aktualTanggalSelesai,
+                keterangan
+            } = req.body;
+
+            const progresEksis = await prisma.progresTahapan.findUnique({
+                where: { id: parseInt(progresId) },
+                include: {
+                    tahapan: true,
+                    transaksi: {
+                        include: {
+                            program: true
+                        }
+                    }
+                }
+            });
+
+            if (!progresEksis) {
+                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            const result = await prisma.$transaction(async (tx) => {
+
+                const dataUpdate = {};
+
+                if (keterangan !== undefined) dataUpdate.keterangan = keterangan;
+
+                if (aktualTanggalMulai) {
+                    const dateMulai = new Date(aktualTanggalMulai);
+                    if (!isNaN(dateMulai.getTime())) dataUpdate.aktualTanggalMulai = dateMulai;
+                }
+
+                if (aktualTanggalSelesai) {
+                    const dateSelesai = new Date(aktualTanggalSelesai);
+                    if (!isNaN(dateSelesai.getTime())) {
+                        dataUpdate.aktualTanggalSelesai = dateSelesai;
+                        dataUpdate.status = 'selesai';
+
+                        if (progresEksis.tahapan.isWaktuEditable) {
+
+                            const tahapanSelanjutnya = await tx.progresTahapan.findMany({
+                                where: {
+                                    transaksiId: progresEksis.transaksiId,
+                                    tahapan: {
+                                        noUrut: { gt: progresEksis.tahapan.noUrut }
+                                    }
+                                },
+                                include: { tahapan: true },
+                                orderBy: { tahapan: { noUrut: 'asc' } }
+                            });
+
+                            if (tahapanSelanjutnya.length > 0) {
+                                let nextEstimasiMulai = new Date(dateSelesai);
+                                nextEstimasiMulai.setDate(nextEstimasiMulai.getDate() + 1);
+                                nextEstimasiMulai.setHours(0, 0, 0, 0);
+
+                                for (const nextProgres of tahapanSelanjutnya) {
+                                    let pMulai = nextEstimasiMulai ? new Date(nextEstimasiMulai) : null;
+                                    let pSelesai = null;
+
+                                    if (nextProgres.tahapan.standarWaktuHari !== null && nextEstimasiMulai !== null) {
+                                        pSelesai = new Date(pMulai);
+                                        pSelesai.setDate(pSelesai.getDate() + nextProgres.tahapan.standarWaktuHari);
+                                        nextEstimasiMulai = new Date(pSelesai);
+                                    } else {
+                                        pSelesai = null;
+                                        nextEstimasiMulai = null;
+                                    }
+
+                                    await tx.progresTahapan.update({
+                                        where: { id: nextProgres.id },
+                                        data: {
+                                            planningTanggalMulai: pMulai,
+                                            planningTanggalSelesai: pSelesai
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                await tx.progresTahapan.update({
+                    where: { id: parseInt(progresId) },
+                    data: dataUpdate
+                });
+
+                if (req.files && req.files.length > 0) {
+                    const programSlug = progresEksis.transaksi.program.slug;
+
+                    const targetDir = path.join('public', 'uploads', programSlug);
+
+                    if (!fs.existsSync(targetDir)) {
+                        fs.mkdirSync(targetDir, { recursive: true });
+                    }
+
+                    const dataDokumen = req.files.map(file => {
+                        const oldPath = file.path;
+                        const newPath = path.join(targetDir, file.filename);
+
+                        fs.renameSync(oldPath, newPath);
+
+                        return {
+                            progresTahapanId: parseInt(progresId),
+                            namaFile: file.originalname,
+                            fileUrl: `/uploads/${programSlug}/${file.filename}`
+                        };
+                    });
+
+                    await tx.dokumenProgresTahapan.createMany({
+                        data: dataDokumen
+                    });
+                }
+
+                const progresTerbaru = await tx.progresTahapan.findUnique({
+                    where: { id: parseInt(progresId) },
+                    include: { dokumen: true }
+                });
+
+                return progresTerbaru;
+            });
+
+            res.status(200).json({
+                msg: `Berhasil menyimpan data aktual. Jadwal tahapan selanjutnya telah disesuaikan otomatis.`,
+                data: result
+            });
+
+        } catch (error) {
+            console.error(`🔥 [UPDATE AKTUAL ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     }

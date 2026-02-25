@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyToken, verifyProgramAccess } from '../middleware/authUser.js';
 import { staffController } from '../controllers/staffController.js';
+import { uploadDokumen } from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 
@@ -24,5 +25,12 @@ router.get('/program/:slug', staffController.getDetailProgram);
 
 // Update Planning
 router.patch('/progres/:progresId/planning', staffController.updatePlanningTahapan);
+
+// Update Aktual
+router.patch(
+    '/progres/:progresId/aktual',
+    uploadDokumen.array('dokumen', 5),
+    staffController.updateAktualTahapan
+);
 
 export default router;
