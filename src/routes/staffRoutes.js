@@ -33,4 +33,14 @@ router.patch(
     staffController.updateAktualTahapan
 );
 
+// Daftar Dokumen Program
+router.get('/program/:slug/dokumen', staffController.getDokumenProgram);
+
+// Upload Dokumen Program
+router.post(
+    '/program/:slug/dokumen',
+    uploadDokumen.array('dokumen', 5),
+    staffController.uploadDokumenProgram
+);
+
 export default router;
