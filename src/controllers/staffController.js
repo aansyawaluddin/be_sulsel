@@ -81,14 +81,14 @@ export const staffController = {
 
     createProgram: async (req, res) => {
         try {
-            const { namaProgram, anggaran, pengadaanIds } = req.body;
+            const { namaProgram, anggaran, pengadaanList } = req.body;
             const dinasId = req.user.dinasId;
 
             if (!dinasId) {
                 return res.status(403).json({ msg: "Akun Staff Anda belum terikat dengan Dinas manapun" });
             }
-            if (!namaProgram || !anggaran || !pengadaanIds || pengadaanIds.length === 0) {
-                return res.status(400).json({ msg: "Semua field wajib diisi" });
+            if (!namaProgram || !anggaran || !pengadaanList || pengadaanList.length === 0) {
+                return res.status(400).json({ msg: "Semua field wajib diisi beserta detail pengadaannya" });
             }
 
             const result = await prisma.$transaction(async (tx) => {
@@ -105,16 +105,17 @@ export const staffController = {
                     }
                 });
 
-                for (const masterId of pengadaanIds) {
+                for (const item of pengadaanList) {
                     const masterPengadaan = await tx.pengadaan.findUnique({
-                        where: { id: parseInt(masterId) }
+                        where: { id: parseInt(item.pengadaanId) }
                     });
 
-                    if (!masterPengadaan) throw new Error(`Master ID ${masterId} tidak ditemukan`);
+                    if (!masterPengadaan) throw new Error(`Pengadaan ID ${item.pengadaanId} tidak ditemukan`);
 
                     const transaksi = await tx.transaksiPengadaan.create({
                         data: {
                             namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
+                            title: item.title || "Tanpa Judul Spesifik",
                             programId: programBaru.id,
                             pengadaanId: masterPengadaan.id
                         }
@@ -177,7 +178,6 @@ export const staffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
-
 
     getProgram: async (req, res) => {
         try {
@@ -290,6 +290,7 @@ export const staffController = {
                     id: transaksi.id,
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
+                    title: transaksi.title,
                     createdAt: transaksi.createdAt,
                     tahapanList: transaksi.progresTahapan.map(p => ({
                         idTahapan: p.tahapan.id,
@@ -323,4 +324,45 @@ export const staffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
+
+    updatePlanningTahapan: async (req, res) => {
+        try {
+            const { progresId } = req.params;
+            const { planningTanggalMulai, planningTanggalSelesai } = req.body;
+
+            const progresEksis = await prisma.progresTahapan.findUnique({
+                where: { id: parseInt(progresId) },
+            });
+
+            if (!progresEksis) {
+                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            const dataUpdate = {};
+
+            if (planningTanggalMulai) {
+                const dateMulai = new Date(planningTanggalMulai);
+                if (!isNaN(dateMulai.getTime())) dataUpdate.planningTanggalMulai = dateMulai;
+            }
+
+            if (planningTanggalSelesai) {
+                const dateSelesai = new Date(planningTanggalSelesai);
+                if (!isNaN(dateSelesai.getTime())) dataUpdate.planningTanggalSelesai = dateSelesai;
+            }
+
+            const progresDiupdate = await prisma.progresTahapan.update({
+                where: { id: parseInt(progresId) },
+                data: dataUpdate
+            });
+
+            res.status(200).json({
+                msg: `Berhasil mengatur ulang jadwal planning tahapan`,
+                data: progresDiupdate
+            });
+
+        } catch (error) {
+            console.error(`🔥 [UPDATE PLANNING ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    }
 };

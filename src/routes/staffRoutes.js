@@ -22,4 +22,7 @@ router.post('/program', staffController.createProgram);
 // Detail Program
 router.get('/program/:slug', staffController.getDetailProgram);
 
+// Update Planning
+router.patch('/progres/:progresId/planning', staffController.updatePlanningTahapan);
+
 export default router;
