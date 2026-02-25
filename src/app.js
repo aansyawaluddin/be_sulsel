@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 
-import path from 'path'; 
+import path from 'path';
 import { fileURLToPath } from 'url';
 
 import authRoutes from './routes/authRoutes.js';
@@ -45,7 +45,7 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json());
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Routes 
 app.use('/api/auth', authRoutes);
