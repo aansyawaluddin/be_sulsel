@@ -3,8 +3,15 @@ import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 
+import path from 'path'; 
+import { fileURLToPath } from 'url';
+
 import authRoutes from './routes/authRoutes.js';
 import staffRoutes from './routes/staffRoutes.js';
+import gubernurRoutes from './routes/gubernurRoutes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 BigInt.prototype.toJSON = function () {
   return this.toString();
@@ -43,6 +50,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Routes 
 app.use('/api/auth', authRoutes);
 app.use('/api/staff', staffRoutes)
+app.use('/api/gubernur', gubernurRoutes)
 
 app.listen(port, () => {
   console.log(`Server berjalan di http://localhost:${port}`);
