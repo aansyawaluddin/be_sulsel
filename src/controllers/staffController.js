@@ -6,8 +6,7 @@ export const staffController = {
 
     getDinas: async (req, res) => {
         try {
-            const role = req.user.role;
-            const dinasId = req.user.dinasId;
+            const { role, dinasId, username } = req.user;
 
             const filterDinas = {};
             if (role === 'staff') {
@@ -50,6 +49,10 @@ export const staffController = {
 
             res.status(200).json({
                 msg: "Berhasil mengambil data instansi/dinas",
+                user: {
+                    username: username,
+                    role: role
+                },
                 data: formattedDinas
             });
 

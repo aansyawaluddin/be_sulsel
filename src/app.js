@@ -24,6 +24,7 @@ const port = process.env.PORT || 3030;
 
 const allowedOrigins = [
   'http://localhost:3000',
+  'https://sipeka-pearl.vercel.app'
 ];
 
 app.use(cors({

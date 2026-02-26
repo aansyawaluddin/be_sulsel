@@ -4,6 +4,8 @@ export const gubernurController = {
 
     getDinas: async (req, res) => {
         try {
+            const { role, username } = req.user;
+
             const dinasList = await prisma.dinas.findMany({
                 include: {
                     programs: {
@@ -38,6 +40,10 @@ export const gubernurController = {
 
             res.status(200).json({
                 msg: "Berhasil mengambil data seluruh instansi/dinas",
+                user: {
+                    username: username,
+                    role: role
+                },
                 data: formattedDinas
             });
 
@@ -52,7 +58,7 @@ export const gubernurController = {
             const { slug } = req.params;
 
             const programList = await prisma.program.findMany({
-                where: { dinas: { slug: slug } }, 
+                where: { dinas: { slug: slug } },
                 select: {
                     id: true,
                     namaProgram: true,
