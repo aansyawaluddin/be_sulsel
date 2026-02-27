@@ -86,13 +86,13 @@ export const staffController = {
 
     createProgram: async (req, res) => {
         try {
-            const { namaProgram, anggaran, pengadaanList } = req.body;
+            const { namaProgram, pengadaanList } = req.body;
             const dinasId = req.user.dinasId;
 
             if (!dinasId) {
                 return res.status(403).json({ msg: "Akun Staff Anda belum terikat dengan Dinas manapun" });
             }
-            if (!namaProgram || !anggaran || !pengadaanList || pengadaanList.length === 0) {
+            if (!namaProgram || !pengadaanList || pengadaanList.length === 0) {
                 return res.status(400).json({ msg: "Semua field wajib diisi beserta detail pengadaannya" });
             }
 
@@ -105,12 +105,13 @@ export const staffController = {
                     data: {
                         namaProgram,
                         slug: slugUnik,
-                        anggaran: BigInt(anggaran),
                         dinasId: dinasId
                     }
                 });
 
                 for (const item of pengadaanList) {
+                    if (!item.anggaran) throw new Error(`Anggaran wajib diisi untuk pengadaan: ${item.title}`);
+
                     const masterPengadaan = await tx.pengadaan.findUnique({
                         where: { id: parseInt(item.pengadaanId) }
                     });
@@ -121,6 +122,7 @@ export const staffController = {
                         data: {
                             namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
                             title: item.title || "Tanpa Judul Spesifik",
+                            anggaran: BigInt(item.anggaran),
                             programId: programBaru.id,
                             pengadaanId: masterPengadaan.id
                         }
@@ -202,10 +204,10 @@ export const staffController = {
                     id: true,
                     namaProgram: true,
                     slug: true,
-                    anggaran: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
+                            anggaran: true,
                             pengadaan: {
                                 select: {
                                     namaPengadaan: true
@@ -220,11 +222,13 @@ export const staffController = {
             });
 
             const formattedPrograms = programList.map(program => {
+                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
                 return {
                     id: program.id,
                     namaProgram: program.namaProgram,
                     slug: program.slug,
-                    anggaran: program.anggaran,
+                    anggaran: calculatedAnggaran,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
                 };
@@ -282,11 +286,13 @@ export const staffController = {
                 });
             }
 
+            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
             const formattedDetail = {
                 id: detailProgram.id,
                 namaProgram: detailProgram.namaProgram,
                 slug: detailProgram.slug,
-                anggaran: detailProgram.anggaran,
+                anggaran: calculatedTotalAnggaran,
                 isPrioritas: detailProgram.isPrioritas,
                 createdAt: detailProgram.createdAt,
                 dinas: detailProgram.dinas,
@@ -296,6 +302,7 @@ export const staffController = {
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
                     title: transaksi.title,
+                    anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
                     tahapanList: transaksi.progresTahapan.map(p => ({
                         idTahapan: p.tahapan.id,

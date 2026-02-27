@@ -76,7 +76,6 @@ model Program {
   id          Int                  @id @default(autoincrement()) 
   namaProgram String               @map("nama_program")
   slug        String               @unique
-  anggaran    BigInt               
   isPrioritas Boolean              @default(false) @map("is_prioritas")
   
   dinasId     Int                  @map("dinas_id")
@@ -146,9 +145,10 @@ model TransaksiPengadaan {
   id             Int              @id @default(autoincrement()) 
   namaTransaksi  String           @map("nama_transaksi")
   title          String           @map("title")
+  anggaran       BigInt
   
   programId      Int              @map("program_id")
-  program        Program          @relation(fields: [programId], references: [id])
+  program        Program          @relation(fields: [programId], references: [id], onDelete: Cascade)
   
   pengadaanId    Int              @map("pengadaan_id")
   pengadaan      Pengadaan        @relation(fields: [pengadaanId], references: [id])
@@ -165,7 +165,7 @@ model ProgresTahapan {
   id                     Int                    @id @default(autoincrement()) 
   
   transaksiId            Int                    @map("transaksi_id")
-  transaksi              TransaksiPengadaan     @relation(fields: [transaksiId], references: [id])
+  transaksi              TransaksiPengadaan     @relation(fields: [transaksiId], references: [id], onDelete: Cascade)
   
   tahapanId              Int                    @map("tahapan_id")
   tahapan                Tahapan                @relation(fields: [tahapanId], references: [id])
