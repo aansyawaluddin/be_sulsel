@@ -193,16 +193,15 @@ export const masterStaffController = {
                 where: { id: parseInt(id) }
             });
 
+
             if (!existingUser || existingUser.role !== 'staff') {
                 return res.status(404).json({ msg: "Data Staff tidak ditemukan." });
             }
 
             const dataUpdate = {};
-
             if (username) dataUpdate.username = username;
             if (name) dataUpdate.name = name;
             if (dinasId) dataUpdate.dinasId = parseInt(dinasId);
-
             if (password) {
                 const salt = await bcrypt.genSalt(10);
                 dataUpdate.password = await bcrypt.hash(password, salt);
@@ -269,7 +268,7 @@ export const masterStaffController = {
 
     createProgramPrioritas: async (req, res) => {
         try {
-            const { namaProgram, pengadaanList, dinasId } = req.body; 
+            const { namaProgram, pengadaanList, dinasId } = req.body;
 
             if (!dinasId || !namaProgram || !pengadaanList || pengadaanList.length === 0) {
                 return res.status(400).json({ msg: "Semua field termasuk dinasId wajib diisi beserta detail pengadaannya" });
@@ -302,7 +301,7 @@ export const masterStaffController = {
                         data: {
                             namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
                             title: item.title || "Tanpa Judul Spesifik",
-                            anggaran: BigInt(item.anggaran), 
+                            anggaran: BigInt(item.anggaran),
                             programId: programBaru.id,
                             pengadaanId: masterPengadaan.id
                         }
@@ -379,7 +378,7 @@ export const masterStaffController = {
                     createdAt: true,
                     pengadaan: {
                         select: {
-                            anggaran: true, 
+                            anggaran: true,
                             pengadaan: { select: { namaPengadaan: true } }
                         }
                     }
@@ -394,7 +393,7 @@ export const masterStaffController = {
                     id: program.id,
                     namaProgram: program.namaProgram,
                     slug: program.slug,
-                    anggaran: calculatedAnggaran, 
+                    anggaran: calculatedAnggaran,
                     isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
@@ -456,7 +455,7 @@ export const masterStaffController = {
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
                     title: transaksi.title,
-                    anggaran: transaksi.anggaran, 
+                    anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
                     tahapanList: transaksi.progresTahapan.map(p => ({
                         idTahapan: p.tahapan.id,
