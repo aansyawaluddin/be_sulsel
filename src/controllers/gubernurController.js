@@ -63,10 +63,10 @@ export const gubernurController = {
                     id: true,
                     namaProgram: true,
                     slug: true,
-                    anggaran: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
+                            anggaran: true,
                             pengadaan: {
                                 select: {
                                     namaPengadaan: true
@@ -81,11 +81,13 @@ export const gubernurController = {
             });
 
             const formattedPrograms = programList.map(program => {
+                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
                 return {
                     id: program.id,
                     namaProgram: program.namaProgram,
                     slug: program.slug,
-                    anggaran: program.anggaran,
+                    anggaran: calculatedAnggaran, 
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
                 };
@@ -134,11 +136,13 @@ export const gubernurController = {
                 return res.status(404).json({ msg: "Program tidak ditemukan." });
             }
 
+            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
             const formattedDetail = {
                 id: detailProgram.id,
                 namaProgram: detailProgram.namaProgram,
                 slug: detailProgram.slug,
-                anggaran: detailProgram.anggaran,
+                anggaran: calculatedTotalAnggaran,
                 isPrioritas: detailProgram.isPrioritas,
                 createdAt: detailProgram.createdAt,
                 dinas: detailProgram.dinas,
@@ -148,6 +152,7 @@ export const gubernurController = {
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
                     title: transaksi.title,
+                    anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
                     tahapanList: transaksi.progresTahapan.map(p => ({
                         idTahapan: p.tahapan.id,
@@ -181,6 +186,7 @@ export const gubernurController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
+
     getDokumenProgram: async (req, res) => {
         try {
             const { slug } = req.params;
