@@ -40,6 +40,16 @@ export const verifyGovernor = (req, res, next) => {
     next();
 };
 
+
+export const verifyMasterStaff = (req, res, next) => {
+    if (req.user.role !== 'staff_master') {
+        return res.status(403).json({
+            msg: "Akses Terlarang: Fitur ini khusus untuk Master Staff."
+        });
+    }
+    next();
+};
+
 export const verifyProgramAccess = (req, res, next) => {
     const allowedRoles = ['gubernur', 'staff', 'staff_master'];
 

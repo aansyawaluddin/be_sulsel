@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes.js';
 import staffRoutes from './routes/staffRoutes.js';
 import gubernurRoutes from './routes/gubernurRoutes.js';
+import masterStaffRoutes from './routes/masterStaffRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,8 +51,9 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Routes 
 app.use('/api/auth', authRoutes);
-app.use('/api/staff', staffRoutes)
-app.use('/api/gubernur', gubernurRoutes)
+app.use('/api/staff', staffRoutes);
+app.use('/api/gubernur', gubernurRoutes);
+app.use('/api/master', masterStaffRoutes);
 
 app.listen(port, () => {
   console.log(`Server berjalan di http://localhost:${port}`);
