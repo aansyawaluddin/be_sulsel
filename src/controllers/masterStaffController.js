@@ -276,7 +276,7 @@ export const masterStaffController = {
 
             const result = await prisma.$transaction(async (tx) => {
                 const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-                const slugUnik = `${baseSlug}-${Math.random().toString(36).substring(2, 7)}`;
+                const slugUnik = `${baseSlug}`;
 
                 const programBaru = await tx.program.create({
                     data: {

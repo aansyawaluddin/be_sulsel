@@ -99,7 +99,7 @@ export const staffController = {
             const result = await prisma.$transaction(async (tx) => {
 
                 const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-                const slugUnik = `${baseSlug}`;
+                const slugUnik = `${baseSlug}-${Math.random().toString(36).substring(2, 7)}`;
 
                 const programBaru = await tx.program.create({
                     data: {
@@ -192,8 +192,14 @@ export const staffController = {
             const dinasId = req.user.dinasId;
             const role = req.user.role;
 
-            const filter = { dinas: { slug: slug } };
+            const filter = {};
 
+            // 👈 Fleksibel: Kalau dari Frontend ada parameter slug dinas, kita filter.
+            if (slug) {
+                filter.dinas = { slug: slug };
+            }
+
+            // 👈 Kunci Utama Keamanan: Pastikan Staff HANYA melihat data dinasnya sendiri.
             if (role === 'staff') {
                 filter.dinasId = dinasId;
             }
@@ -204,6 +210,7 @@ export const staffController = {
                     id: true,
                     namaProgram: true,
                     slug: true,
+                    isPrioritas: true, // 👈 Agar staff tau ini buatan Master (Prioritas)
                     createdAt: true,
                     pengadaan: {
                         select: {
@@ -229,6 +236,7 @@ export const staffController = {
                     namaProgram: program.namaProgram,
                     slug: program.slug,
                     anggaran: calculatedAnggaran,
+                    isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
                 };
@@ -252,6 +260,8 @@ export const staffController = {
             const role = req.user.role;
 
             const filter = { slug: slug };
+
+            // Validasi: Staff hanya bisa ambil detail jika dinasId cocok
             if (role === 'staff') {
                 filter.dinasId = dinasId;
             }
@@ -344,10 +354,21 @@ export const staffController = {
 
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
+                // 👈 PROTEKSI: Include tabel parent untuk dicek dinasId-nya
+                include: {
+                    transaksi: {
+                        include: { program: true }
+                    }
+                }
             });
 
             if (!progresEksis) {
                 return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            // 👈 PROTEKSI: Jika user adalah staff, pastikan progres ini milik dinasnya!
+            if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
+                return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
 
             const dataUpdate = {};
@@ -402,6 +423,11 @@ export const staffController = {
 
             if (!progresEksis) {
                 return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            // 👈 PROTEKSI: Blokir staff jika mengedit progres dinas lain
+            if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
+                return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
 
             const result = await prisma.$transaction(async (tx) => {
