@@ -32,6 +32,13 @@ router.get('/dinas/:slug/program', masterStaffController.getProgram);
 router.get('/pengadaan', masterStaffController.getPengadaan);
 router.get('/dinas/dropdown', masterStaffController.getDinasDropdown);
 
+// Inbox
+router.get('/inbox', masterStaffController.getInbox);
+
+// validasi
+router.patch('/program/:slug/terima', masterStaffController.terimaProgram);
+router.patch('/program/:slug/tolak', masterStaffController.tolakProgram);
+
 // Buat Program Prooritas
 router.post('/program', masterStaffController.createProgramPrioritas);
 

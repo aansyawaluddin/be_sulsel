@@ -18,6 +18,13 @@ enum StatusTahapan {
   selesai
 }
 
+enum StatusProgram {
+  menunggu
+  tolak
+  terima
+}
+
+
 // =========================================
 // USER & AUTH
 // =========================================
@@ -77,6 +84,7 @@ model Program {
   namaProgram String               @map("nama_program")
   slug        String               @unique
   isPrioritas Boolean              @default(false) @map("is_prioritas")
+  status      StatusProgram        @default(menunggu)
   
   dinasId     Int                  @map("dinas_id")
   dinas       Dinas                @relation(fields: [dinasId], references: [id])
@@ -178,7 +186,7 @@ model ProgresTahapan {
   aktualTanggalMulai     DateTime?              @map("aktual_tanggal_mulai")
   aktualTanggalSelesai   DateTime?              @map("aktual_tanggal_selesai")
   
-  keterangan             String?                @db.Text
+  keterangan             Json?
   
   dokumen                DokumenProgresTahapan[] 
 

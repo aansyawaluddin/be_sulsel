@@ -284,9 +284,9 @@ export const masterStaffController = {
                     data: {
                         namaProgram,
                         slug: slugUnik,
-                        // anggaran dihapus dari sini
                         dinasId: parseInt(dinasId),
-                        isPrioritas: true
+                        isPrioritas: true,
+                        status: 'terima'
                     }
                 });
 
@@ -377,6 +377,7 @@ export const masterStaffController = {
                     namaProgram: true,
                     slug: true,
                     isPrioritas: true,
+                    status: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
@@ -396,6 +397,7 @@ export const masterStaffController = {
                     namaProgram: program.namaProgram,
                     slug: program.slug,
                     anggaran: calculatedAnggaran,
+                    status: program.status,
                     isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
@@ -592,7 +594,30 @@ export const masterStaffController = {
 
                 const dataUpdate = {};
 
-                if (keterangan !== undefined) dataUpdate.keterangan = keterangan;
+                if (keterangan && keterangan.trim() !== "") {
+                    let daftarKeterangan = [];
+
+                    if (progresEksis.keterangan) {
+                        if (Array.isArray(progresEksis.keterangan)) {
+                            daftarKeterangan = progresEksis.keterangan;
+                        }
+                        else if (typeof progresEksis.keterangan === 'string') {
+                            daftarKeterangan.push({
+                                catatan: progresEksis.keterangan,
+                                tanggal: progresEksis.updatedAt.toISOString(),
+                                penulis: "Sistem (Data Lama)"
+                            });
+                        }
+                    }
+
+                    daftarKeterangan.push({
+                        catatan: keterangan,
+                        tanggal: new Date().toISOString(),
+                        penulis: req.user.username
+                    });
+
+                    dataUpdate.keterangan = daftarKeterangan;
+                }
 
                 if (aktualTanggalMulai) {
                     const dateMulai = new Date(aktualTanggalMulai);
@@ -752,7 +777,127 @@ export const masterStaffController = {
             console.error(`🔥 [MASTER - UPLOAD DOKUMEN PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
+    },
+
+    getInbox: async (req, res) => {
+        try {
+            const inboxList = await prisma.program.findMany({
+                include: {
+                    dinas: {
+                        select: { namaDinas: true }
+                    },
+                    pengadaan: {
+                        select: {
+                            anggaran: true,
+                            pengadaan: { select: { namaPengadaan: true } }
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+
+            const formattedInbox = inboxList.map(program => {
+                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
+                return {
+                    id: program.id,
+                    namaProgram: program.namaProgram,
+                    dinasPemohon: program.dinas.namaDinas,
+                    slug: program.slug,
+                    status: program.status,
+                    totalAnggaran: calculatedAnggaran,
+                    tanggalPengajuan: program.createdAt,
+                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
+                }
+            });
+
+            res.status(200).json({
+                msg: "Berhasil mengambil seluruh riwayat program (Semua Status)",
+                totalData: formattedInbox.length,
+                data: formattedInbox
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - GET INBOX ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    terimaProgram: async (req, res) => {
+        try {
+            const { slug } = req.params;
+
+            const programTarget = await prisma.program.findUnique({
+                where: { slug: slug }
+            });
+
+            if (!programTarget) {
+                return res.status(404).json({ msg: "Program tidak ditemukan." });
+            }
+
+            if (programTarget.status !== 'menunggu') {
+                return res.status(400).json({ msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}` });
+            }
+
+            const programDiterima = await prisma.program.update({
+                where: { slug: slug },
+                data: { status: 'terima' },
+                select: {
+                    id: true,
+                    namaProgram: true,
+                    slug: true,
+                    status: true,
+                    dinas: { select: { namaDinas: true } }
+                }
+            });
+
+            res.status(200).json({
+                msg: `Program '${programDiterima.namaProgram}' dari ${programDiterima.dinas.namaDinas} berhasil diterima!`,
+                data: programDiterima
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - TERIMA PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    tolakProgram: async (req, res) => {
+        try {
+            const { slug } = req.params;
+
+            const programTarget = await prisma.program.findUnique({
+                where: { slug: slug }
+            });
+
+            if (!programTarget) {
+                return res.status(404).json({ msg: "Program tidak ditemukan." });
+            }
+
+            if (programTarget.status !== 'menunggu') {
+                return res.status(400).json({ msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}` });
+            }
+
+            const programDitolak = await prisma.program.update({
+                where: { slug: slug },
+                data: { status: 'tolak' },
+                select: {
+                    id: true,
+                    namaProgram: true,
+                    slug: true,
+                    status: true,
+                    dinas: { select: { namaDinas: true } }
+                }
+            });
+
+            res.status(200).json({
+                msg: `Program '${programDitolak.namaProgram}' dari ${programDitolak.dinas.namaDinas} telah ditolak.`,
+                data: programDitolak
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - TOLAK PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
     }
-
-
 }

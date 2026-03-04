@@ -195,6 +195,20 @@ export const staffController = {
             const filter = {};
 
             if (slug) {
+                const targetDinas = await prisma.dinas.findUnique({
+                    where: { slug: slug }
+                });
+
+                if (!targetDinas) {
+                    return res.status(404).json({ msg: "Instansi/Dinas tidak ditemukan." });
+                }
+
+                if (role === 'staff' && targetDinas.id !== dinasId) {
+                    return res.status(403).json({
+                        msg: "Akses Terlarang: Anda tidak diizinkan melihat data milik instansi lain."
+                    });
+                }
+
                 filter.dinas = { slug: slug };
             }
 
@@ -209,6 +223,7 @@ export const staffController = {
                     namaProgram: true,
                     slug: true,
                     isPrioritas: true,
+                    status: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
@@ -235,6 +250,7 @@ export const staffController = {
                     slug: program.slug,
                     anggaran: calculatedAnggaran,
                     isPrioritas: program.isPrioritas,
+                    status: program.status,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
                 };
@@ -293,6 +309,12 @@ export const staffController = {
                 });
             }
 
+            if (role === 'staff' && detailProgram.status === 'menunggu') {
+                return res.status(403).json({
+                    msg: "Akses Ditolak: Program ini sedang menunggu validasi dari Master Staff dan belum bisa diakses."
+                });
+            }
+
             const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
 
             const formattedDetail = {
@@ -300,6 +322,7 @@ export const staffController = {
                 namaProgram: detailProgram.namaProgram,
                 slug: detailProgram.slug,
                 anggaran: calculatedTotalAnggaran,
+                status: detailProgram.status,
                 isPrioritas: detailProgram.isPrioritas,
                 createdAt: detailProgram.createdAt,
                 dinas: detailProgram.dinas,
@@ -366,6 +389,10 @@ export const staffController = {
                 return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
 
+            if (progresEksis.transaksi.program.status === 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
+            }
+
             const dataUpdate = {};
 
             if (planningTanggalMulai) {
@@ -424,11 +451,36 @@ export const staffController = {
                 return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
 
+            if (progresEksis.transaksi.program.status === 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
+            }
             const result = await prisma.$transaction(async (tx) => {
 
                 const dataUpdate = {};
 
-                if (keterangan !== undefined) dataUpdate.keterangan = keterangan;
+                if (keterangan && keterangan.trim() !== "") {
+                    let daftarKeterangan = [];
+
+                    if (progresEksis.keterangan) {
+                        if (Array.isArray(progresEksis.keterangan)) {
+                            daftarKeterangan = progresEksis.keterangan;
+                        } else if (typeof progresEksis.keterangan === 'string') {
+                            daftarKeterangan.push({
+                                catatan: progresEksis.keterangan,
+                                tanggal: progresEksis.updatedAt.toISOString(),
+                                penulis: "Sistem (Data Lama)"
+                            });
+                        }
+                    }
+
+                    daftarKeterangan.push({
+                        catatan: keterangan,
+                        tanggal: new Date().toISOString(),
+                        penulis: req.user.username
+                    });
+
+                    dataUpdate.keterangan = daftarKeterangan;
+                }
 
                 if (aktualTanggalMulai) {
                     const dateMulai = new Date(aktualTanggalMulai);
@@ -555,6 +607,10 @@ export const staffController = {
                 return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
             }
 
+            if (role === 'staff' && program.status === 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
+            }
+
             if (!req.files || req.files.length === 0) {
                 return res.status(400).json({ msg: "Tidak ada dokumen yang diunggah." });
             }
@@ -610,11 +666,15 @@ export const staffController = {
 
             const program = await prisma.program.findFirst({
                 where: filter,
-                select: { id: true }
+                select: { id: true, status: true }
             });
 
             if (!program) {
                 return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
+            }
+
+            if (role === 'staff' && program.status === 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
 
             const dokumenList = await prisma.dokumenProgram.findMany({
