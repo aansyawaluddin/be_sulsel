@@ -140,19 +140,17 @@ export const staffController = {
                     const dataProgres = [];
 
                     for (const tahapan of masterTahapanList) {
-                        let tanggalMulaiSekarang = estimasiTanggalMulai ? new Date(estimasiTanggalMulai) : null;
-                        let tanggalSelesaiSekarang = null;
+                        let tanggalMulaiSekarang = new Date(estimasiTanggalMulai);
+                        let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
 
-                        if (tahapan.standarWaktuHari !== null && estimasiTanggalMulai !== null) {
-                            tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
-                            tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + tahapan.standarWaktuHari);
+                        let durasiHari = tahapan.standarWaktuHari;
+                        if (tahapan.isWaktuEditable && durasiHari === null) {
+                            durasiHari = 14;
+                        } else if (durasiHari === null) {
+                            durasiHari = 1;
+                        }
 
-                            estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
-                        }
-                        else {
-                            tanggalSelesaiSekarang = null;
-                            estimasiTanggalMulai = null;
-                        }
+                        tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
 
                         dataProgres.push({
                             transaksiId: transaksi.id,
@@ -161,6 +159,8 @@ export const staffController = {
                             planningTanggalMulai: tanggalMulaiSekarang,
                             planningTanggalSelesai: tanggalSelesaiSekarang
                         });
+
+                        estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
                     }
 
                     if (dataProgres.length > 0) {
@@ -375,6 +375,7 @@ export const staffController = {
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
                 include: {
+                    tahapan: true,
                     transaksi: {
                         include: { program: true }
                     }
@@ -393,26 +394,81 @@ export const staffController = {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
 
-            const dataUpdate = {};
+            const result = await prisma.$transaction(async (tx) => {
+                const dataUpdate = {};
 
-            if (planningTanggalMulai) {
-                const dateMulai = new Date(planningTanggalMulai);
-                if (!isNaN(dateMulai.getTime())) dataUpdate.planningTanggalMulai = dateMulai;
-            }
+                if (planningTanggalMulai) {
+                    const dateMulai = new Date(planningTanggalMulai);
+                    if (!isNaN(dateMulai.getTime())) dataUpdate.planningTanggalMulai = dateMulai;
+                }
 
-            if (planningTanggalSelesai) {
-                const dateSelesai = new Date(planningTanggalSelesai);
-                if (!isNaN(dateSelesai.getTime())) dataUpdate.planningTanggalSelesai = dateSelesai;
-            }
+                if (planningTanggalSelesai) {
+                    const dateSelesai = new Date(planningTanggalSelesai);
+                    if (!isNaN(dateSelesai.getTime())) dataUpdate.planningTanggalSelesai = dateSelesai;
+                }
 
-            const progresDiupdate = await prisma.progresTahapan.update({
-                where: { id: parseInt(progresId) },
-                data: dataUpdate
+                const progresDiupdate = await tx.progresTahapan.update({
+                    where: { id: parseInt(progresId) },
+                    data: dataUpdate
+                });
+
+                if (dataUpdate.planningTanggalSelesai) {
+
+                    const tahapanSelanjutnya = await tx.progresTahapan.findMany({
+                        where: {
+                            transaksiId: progresEksis.transaksiId,
+                            tahapan: {
+                                noUrut: { gt: progresEksis.tahapan.noUrut }
+                            }
+                        },
+                        include: { tahapan: true },
+                        orderBy: { tahapan: { noUrut: 'asc' } }
+                    });
+
+                    if (tahapanSelanjutnya.length > 0) {
+                        let currentEndDate = new Date(dataUpdate.planningTanggalSelesai);
+
+                        for (const nextProgres of tahapanSelanjutnya) {
+
+                            let pMulai = new Date(currentEndDate);
+                            pMulai.setDate(pMulai.getDate() + 1);
+                            pMulai.setHours(0, 0, 0, 0);
+
+                            let durasiHari = nextProgres.tahapan.standarWaktuHari;
+
+                            if (durasiHari === null) {
+                                if (nextProgres.planningTanggalMulai && nextProgres.planningTanggalSelesai) {
+                                    const diffTime = nextProgres.planningTanggalSelesai.getTime() - nextProgres.planningTanggalMulai.getTime();
+                                    durasiHari = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                    if (durasiHari < 0) durasiHari = 1;
+                                } else {
+                                    durasiHari = nextProgres.tahapan.isWaktuEditable ? 14 : 1;
+                                }
+                            }
+
+
+                            let pSelesai = new Date(pMulai);
+                            pSelesai.setDate(pSelesai.getDate() + durasiHari);
+
+                            await tx.progresTahapan.update({
+                                where: { id: nextProgres.id },
+                                data: {
+                                    planningTanggalMulai: pMulai,
+                                    planningTanggalSelesai: pSelesai
+                                }
+                            });
+
+                            currentEndDate = new Date(pSelesai);
+                        }
+                    }
+                }
+
+                return progresDiupdate;
             });
 
             res.status(200).json({
-                msg: `Berhasil mengatur ulang jadwal planning tahapan`,
-                data: progresDiupdate
+                msg: `Berhasil mengatur ulang jadwal planning. Jadwal tahapan selanjutnya telah disesuaikan otomatis.`,
+                data: result
             });
 
         } catch (error) {
@@ -454,6 +510,7 @@ export const staffController = {
             if (progresEksis.transaksi.program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
+
             const result = await prisma.$transaction(async (tx) => {
 
                 const dataUpdate = {};
@@ -492,48 +549,6 @@ export const staffController = {
                     if (!isNaN(dateSelesai.getTime())) {
                         dataUpdate.aktualTanggalSelesai = dateSelesai;
                         dataUpdate.status = 'selesai';
-
-                        if (progresEksis.tahapan.isWaktuEditable) {
-
-                            const tahapanSelanjutnya = await tx.progresTahapan.findMany({
-                                where: {
-                                    transaksiId: progresEksis.transaksiId,
-                                    tahapan: {
-                                        noUrut: { gt: progresEksis.tahapan.noUrut }
-                                    }
-                                },
-                                include: { tahapan: true },
-                                orderBy: { tahapan: { noUrut: 'asc' } }
-                            });
-
-                            if (tahapanSelanjutnya.length > 0) {
-                                let nextEstimasiMulai = new Date(dateSelesai);
-                                nextEstimasiMulai.setDate(nextEstimasiMulai.getDate() + 1);
-                                nextEstimasiMulai.setHours(0, 0, 0, 0);
-
-                                for (const nextProgres of tahapanSelanjutnya) {
-                                    let pMulai = nextEstimasiMulai ? new Date(nextEstimasiMulai) : null;
-                                    let pSelesai = null;
-
-                                    if (nextProgres.tahapan.standarWaktuHari !== null && nextEstimasiMulai !== null) {
-                                        pSelesai = new Date(pMulai);
-                                        pSelesai.setDate(pSelesai.getDate() + nextProgres.tahapan.standarWaktuHari);
-                                        nextEstimasiMulai = new Date(pSelesai);
-                                    } else {
-                                        pSelesai = null;
-                                        nextEstimasiMulai = null;
-                                    }
-
-                                    await tx.progresTahapan.update({
-                                        where: { id: nextProgres.id },
-                                        data: {
-                                            planningTanggalMulai: pMulai,
-                                            planningTanggalSelesai: pSelesai
-                                        }
-                                    });
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -578,7 +593,7 @@ export const staffController = {
             });
 
             res.status(200).json({
-                msg: `Berhasil menyimpan data aktual. Jadwal tahapan selanjutnya telah disesuaikan otomatis.`,
+                msg: `Berhasil menyimpan data aktual.`,
                 data: result
             });
 
