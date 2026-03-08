@@ -368,6 +368,42 @@ export const masterStaffController = {
         }
     },
 
+    updateProgram: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { namaProgram } = req.body;
+
+            if (!namaProgram) return res.status(400).json({ msg: "Nama Program baru wajib diisi." });
+
+            const programEksis = await prisma.program.findUnique({
+                where: { id: parseInt(id) }
+            });
+
+            if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
+
+            const dataUpdate = { namaProgram: namaProgram };
+
+            if (programEksis.status === 'menunggu') {
+                const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+                dataUpdate.slug = `${baseSlug}`;
+            }
+
+            const programDiupdate = await prisma.program.update({
+                where: { id: parseInt(id) },
+                data: dataUpdate
+            });
+
+            res.status(200).json({
+                msg: "Berhasil mengubah nama program (Master Mode).",
+                data: programDiupdate
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - UPDATE PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     getProgram: async (req, res) => {
         try {
             const { slug } = req.params;
@@ -651,6 +687,10 @@ export const masterStaffController = {
                 return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
             }
 
+            if (progresEksis.status === 'selesai') {
+                return res.status(403).json({ msg: "Akses Ditolak: Tahapan ini sudah diselesaikan dan datanya telah dikunci." });
+            }
+
             const result = await prisma.$transaction(async (tx) => {
 
                 const dataUpdate = {};
@@ -689,49 +729,6 @@ export const masterStaffController = {
                     const dateSelesai = new Date(aktualTanggalSelesai);
                     if (!isNaN(dateSelesai.getTime())) {
                         dataUpdate.aktualTanggalSelesai = dateSelesai;
-                        dataUpdate.status = 'selesai';
-
-                        if (progresEksis.tahapan.isWaktuEditable) {
-
-                            const tahapanSelanjutnya = await tx.progresTahapan.findMany({
-                                where: {
-                                    transaksiId: progresEksis.transaksiId,
-                                    tahapan: {
-                                        noUrut: { gt: progresEksis.tahapan.noUrut }
-                                    }
-                                },
-                                include: { tahapan: true },
-                                orderBy: { tahapan: { noUrut: 'asc' } }
-                            });
-
-                            if (tahapanSelanjutnya.length > 0) {
-                                let nextEstimasiMulai = new Date(dateSelesai);
-                                nextEstimasiMulai.setDate(nextEstimasiMulai.getDate() + 1);
-                                nextEstimasiMulai.setHours(0, 0, 0, 0);
-
-                                for (const nextProgres of tahapanSelanjutnya) {
-                                    let pMulai = nextEstimasiMulai ? new Date(nextEstimasiMulai) : null;
-                                    let pSelesai = null;
-
-                                    if (nextProgres.tahapan.standarWaktuHari !== null && nextEstimasiMulai !== null) {
-                                        pSelesai = new Date(pMulai);
-                                        pSelesai.setDate(pSelesai.getDate() + nextProgres.tahapan.standarWaktuHari);
-                                        nextEstimasiMulai = new Date(pSelesai);
-                                    } else {
-                                        pSelesai = null;
-                                        nextEstimasiMulai = null;
-                                    }
-
-                                    await tx.progresTahapan.update({
-                                        where: { id: nextProgres.id },
-                                        data: {
-                                            planningTanggalMulai: pMulai,
-                                            planningTanggalSelesai: pSelesai
-                                        }
-                                    });
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -776,12 +773,44 @@ export const masterStaffController = {
             });
 
             res.status(200).json({
-                msg: `Berhasil menyimpan data aktual. Jadwal tahapan selanjutnya disesuaikan otomatis (Master Mode).`,
+                msg: `Berhasil menyimpan data aktual (Master Mode).`,
                 data: result
             });
 
         } catch (error) {
             console.error(`🔥 [MASTER - UPDATE AKTUAL ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    selesaikanTahapan: async (req, res) => {
+        try {
+            const { progresId } = req.params;
+
+            const progresEksis = await prisma.progresTahapan.findUnique({
+                where: { id: parseInt(progresId) }
+            });
+
+            if (!progresEksis) {
+                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            if (progresEksis.status === 'selesai') {
+                return res.status(400).json({ msg: "Tahapan ini sudah dikunci sebelumnya." });
+            }
+
+            const progresDikunci = await prisma.progresTahapan.update({
+                where: { id: parseInt(progresId) },
+                data: { status: 'selesai' }
+            });
+
+            res.status(200).json({
+                msg: "Tahapan berhasil diselesaikan dan dikunci (Master Mode). Data pada tahapan ini tidak dapat diubah lagi.",
+                data: progresDikunci
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - SELESAIKAN TAHAPAN ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
@@ -926,9 +955,9 @@ export const masterStaffController = {
     tolakProgram: async (req, res) => {
         try {
             const { slug } = req.params;
-
             const programTarget = await prisma.program.findUnique({
-                where: { slug: slug }
+                where: { slug: slug },
+                include: { dinas: true }
             });
 
             if (!programTarget) {
@@ -939,21 +968,21 @@ export const masterStaffController = {
                 return res.status(400).json({ msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}` });
             }
 
-            const programDitolak = await prisma.program.update({
-                where: { slug: slug },
-                data: { status: 'tolak' },
-                select: {
-                    id: true,
-                    namaProgram: true,
-                    slug: true,
-                    status: true,
-                    dinas: { select: { namaDinas: true } }
-                }
+            await prisma.program.delete({
+                where: { slug: slug }
             });
 
+            const targetDir = path.join('public', 'uploads', programTarget.slug);
+            if (fs.existsSync(targetDir)) {
+                fs.rmSync(targetDir, { recursive: true, force: true });
+            }
+
             res.status(200).json({
-                msg: `Program '${programDitolak.namaProgram}' dari ${programDitolak.dinas.namaDinas} telah ditolak.`,
-                data: programDitolak
+                msg: `Program '${programTarget.namaProgram}' dari instansi ${programTarget.dinas?.namaDinas || 'Tidak Diketahui'} telah DITOLAK dan datanya otomatis DIHAPUS dari sistem.`,
+                data: {
+                    namaProgram: programTarget.namaProgram,
+                    status: 'ditolak_dan_dihapus'
+                }
             });
 
         } catch (error) {

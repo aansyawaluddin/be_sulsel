@@ -267,6 +267,88 @@ export const staffController = {
         }
     },
 
+    updateProgram: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { namaProgram } = req.body;
+            const dinasId = req.user.dinasId;
+
+            if (!namaProgram) return res.status(400).json({ msg: "Nama Program baru wajib diisi." });
+
+            const programEksis = await prisma.program.findUnique({
+                where: { id: parseInt(id) }
+            });
+
+            if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
+
+            if (programEksis.dinasId !== dinasId) {
+                return res.status(403).json({ msg: "Akses Terlarang: Anda tidak dapat mengubah program milik instansi lain." });
+            }
+
+            if (programEksis.status !== 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program yang sudah divalidasi tidak dapat diubah namanya." });
+            }
+
+            const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+            const slugUnik = `${baseSlug}`;
+
+            const programDiupdate = await prisma.program.update({
+                where: { id: parseInt(id) },
+                data: {
+                    namaProgram: namaProgram,
+                    slug: slugUnik 
+                }
+            });
+
+            res.status(200).json({
+                msg: "Berhasil mengubah nama program beserta link URL-nya.",
+                data: programDiupdate
+            });
+
+        } catch (error) {
+            console.error(`🔥 [STAFF - UPDATE PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    deleteProgram: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const dinasId = req.user.dinasId;
+
+            const programEksis = await prisma.program.findUnique({
+                where: { id: parseInt(id) }
+            });
+
+            if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
+
+            if (programEksis.dinasId !== dinasId) {
+                return res.status(403).json({ msg: "Akses Terlarang: Anda tidak dapat menghapus program milik instansi lain." });
+            }
+
+            if (programEksis.status === 'terima') {
+                return res.status(403).json({
+                    msg: "Akses Ditolak: Program yang sudah disetujui tidak dapat dihapus."
+                });
+            }
+
+            await prisma.program.delete({ where: { id: parseInt(id) } });
+
+            const targetDir = path.join('public', 'uploads', programEksis.slug);
+            if (fs.existsSync(targetDir)) {
+                fs.rmSync(targetDir, { recursive: true, force: true });
+            }
+
+            res.status(200).json({
+                msg: `Program '${programEksis.namaProgram}' berhasil dihapus.`
+            });
+
+        } catch (error) {
+            console.error(`🔥 [STAFF - DELETE PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     getDetailProgram: async (req, res) => {
         try {
             const { slug } = req.params;
@@ -511,6 +593,10 @@ export const staffController = {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
 
+            if (progresEksis.status === 'selesai') {
+                return res.status(403).json({ msg: "Akses Ditolak: Tahapan ini sudah diselesaikan dan datanya telah dikunci." });
+            }
+
             const result = await prisma.$transaction(async (tx) => {
 
                 const dataUpdate = {};
@@ -548,7 +634,6 @@ export const staffController = {
                     const dateSelesai = new Date(aktualTanggalSelesai);
                     if (!isNaN(dateSelesai.getTime())) {
                         dataUpdate.aktualTanggalSelesai = dateSelesai;
-                        dataUpdate.status = 'selesai';
                     }
                 }
 
@@ -599,6 +684,51 @@ export const staffController = {
 
         } catch (error) {
             console.error(`🔥 [UPDATE AKTUAL ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
+    selesaikanTahapan: async (req, res) => {
+        try {
+            const { progresId } = req.params;
+
+            const progresEksis = await prisma.progresTahapan.findUnique({
+                where: { id: parseInt(progresId) },
+                include: {
+                    transaksi: {
+                        include: { program: true }
+                    }
+                }
+            });
+
+            if (!progresEksis) {
+                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
+            }
+
+            if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
+                return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
+            }
+
+            if (progresEksis.transaksi.program.status === 'menunggu') {
+                return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
+            }
+
+            if (progresEksis.status === 'selesai') {
+                return res.status(400).json({ msg: "Tahapan ini sudah dikunci sebelumnya." });
+            }
+
+            const progresDikunci = await prisma.progresTahapan.update({
+                where: { id: parseInt(progresId) },
+                data: { status: 'selesai' }
+            });
+
+            res.status(200).json({
+                msg: "Tahapan berhasil diselesaikan dan dikunci. Data pada tahapan ini tidak dapat diubah lagi.",
+                data: progresDikunci
+            });
+
+        } catch (error) {
+            console.error(`🔥 [SELESAIKAN TAHAPAN ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },

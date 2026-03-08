@@ -42,6 +42,8 @@ router.patch('/program/:slug/tolak', masterStaffController.tolakProgram);
 // Buat Program Prooritas
 router.post('/program', masterStaffController.createProgramPrioritas);
 
+router.patch('/program/:id', masterStaffController.updateProgram);
+
 // Detail Program
 router.get('/program/:slug', masterStaffController.getDetailProgram);
 
@@ -57,6 +59,8 @@ router.patch(
     uploadDokumen.array('dokumen', 5),
     masterStaffController.updateAktualTahapan
 );
+
+router.patch('/progres/:progresId/selesai', masterStaffController.selesaikanTahapan);
 
 // Upload Dokumen Program
 router.post(

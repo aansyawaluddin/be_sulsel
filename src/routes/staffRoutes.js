@@ -20,6 +20,12 @@ router.get('/pengadaan', staffController.getPengadaan);
 // Buat Program
 router.post('/program', staffController.createProgram);
 
+// Edit Nama Program
+router.patch('/program/:id', staffController.updateProgram);
+
+// Hapus Program
+router.delete('/program/:id', staffController.deleteProgram);
+
 // Detail Program
 router.get('/program/:slug', staffController.getDetailProgram);
 
@@ -32,6 +38,9 @@ router.patch(
     uploadDokumen.array('dokumen', 5),
     staffController.updateAktualTahapan
 );
+
+// Kunci Selesai
+router.patch('/progres/:progresId/selesai', staffController.selesaikanTahapan);
 
 // Daftar Dokumen Program
 router.get('/program/:slug/dokumen', staffController.getDokumenProgram);
