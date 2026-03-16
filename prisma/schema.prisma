@@ -80,20 +80,21 @@ model Dinas {
 }
 
 model Program {
-  id          Int                  @id @default(autoincrement()) 
-  namaProgram String               @map("nama_program")
-  slug        String               @unique
-  isPrioritas Boolean              @default(false) @map("is_prioritas")
-  status      StatusProgram        @default(menunggu)
+  id            Int                  @id @default(autoincrement()) 
+  namaProgram   String               @map("nama_program")
+  slug          String               @unique
+  isPrioritas   Boolean              @default(false) @map("is_prioritas")
+  status        StatusProgram        @default(menunggu)
+  tanggalMulai  DateTime?            @map("tanggal_mulai") 
   
-  dinasId     Int                  @map("dinas_id")
-  dinas       Dinas                @relation(fields: [dinasId], references: [id])
+  dinasId       Int                  @map("dinas_id")
+  dinas         Dinas                @relation(fields: [dinasId], references: [id])
   
-  pengadaan   TransaksiPengadaan[]
-  dokumen     DokumenProgram[]     
+  pengadaan     TransaksiPengadaan[]
+  dokumen       DokumenProgram[]     
   
-  createdAt   DateTime             @default(now()) @map("created_at")
-  updatedAt   DateTime             @updatedAt @map("updated_at")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
 
   @@map("programs")
 }

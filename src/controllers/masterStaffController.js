@@ -270,7 +270,7 @@ export const masterStaffController = {
 
     createProgramPrioritas: async (req, res) => {
         try {
-            const { namaProgram, pengadaanList, dinasId } = req.body;
+            const { namaProgram, pengadaanList, dinasId, tanggalMulai } = req.body;
 
             if (!dinasId || !namaProgram || !pengadaanList || pengadaanList.length === 0) {
                 return res.status(400).json({ msg: "Semua field termasuk dinasId wajib diisi beserta detail pengadaannya" });
@@ -286,7 +286,8 @@ export const masterStaffController = {
                         slug: slugUnik,
                         dinasId: parseInt(dinasId),
                         isPrioritas: true,
-                        status: 'terima'
+                        status: 'terima',
+                        tanggalMulai: tanggalMulai ? new Date(tanggalMulai) : null
                     }
                 });
 
@@ -314,9 +315,16 @@ export const masterStaffController = {
                         orderBy: { noUrut: 'asc' }
                     });
 
-                    let estimasiTanggalMulai = new Date();
-                    estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
-                    estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    let estimasiTanggalMulai;
+
+                    if (tanggalMulai) {
+                        estimasiTanggalMulai = new Date(tanggalMulai);
+                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    } else {
+                        estimasiTanggalMulai = new Date();
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    }
 
                     const dataProgres = [];
 
@@ -342,6 +350,7 @@ export const masterStaffController = {
                         });
 
                         estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
                     }
 
                     if (dataProgres.length > 0) {
@@ -353,7 +362,8 @@ export const masterStaffController = {
                     id: programBaru.id,
                     namaProgram: programBaru.namaProgram,
                     slug: programBaru.slug,
-                    isPrioritas: programBaru.isPrioritas
+                    isPrioritas: programBaru.isPrioritas,
+                    tanggalMulai: programBaru.tanggalMulai
                 };
             });
 

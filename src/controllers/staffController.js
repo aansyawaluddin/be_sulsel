@@ -86,7 +86,7 @@ export const staffController = {
 
     createProgram: async (req, res) => {
         try {
-            const { namaProgram, pengadaanList } = req.body;
+            const { namaProgram, pengadaanList, tanggalMulai } = req.body;
             const dinasId = req.user.dinasId;
 
             if (!dinasId) {
@@ -105,7 +105,8 @@ export const staffController = {
                     data: {
                         namaProgram,
                         slug: slugUnik,
-                        dinasId: dinasId
+                        dinasId: dinasId,
+                        tanggalMulai: tanggalMulai ? new Date(tanggalMulai) : null
                     }
                 });
 
@@ -133,9 +134,16 @@ export const staffController = {
                         orderBy: { noUrut: 'asc' }
                     });
 
-                    let estimasiTanggalMulai = new Date();
-                    estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
-                    estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    let estimasiTanggalMulai;
+
+                    if (tanggalMulai) {
+                        estimasiTanggalMulai = new Date(tanggalMulai);
+                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    } else {
+                        estimasiTanggalMulai = new Date();
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                    }
 
                     const dataProgres = [];
 
@@ -161,6 +169,7 @@ export const staffController = {
                         });
 
                         estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
                     }
 
                     if (dataProgres.length > 0) {
@@ -171,7 +180,8 @@ export const staffController = {
                 return {
                     id: programBaru.id,
                     namaProgram: programBaru.namaProgram,
-                    slug: programBaru.slug
+                    slug: programBaru.slug,
+                    tanggalMulai: programBaru.tanggalMulai
                 };
             });
 
@@ -296,7 +306,7 @@ export const staffController = {
                 where: { id: parseInt(id) },
                 data: {
                     namaProgram: namaProgram,
-                    slug: slugUnik 
+                    slug: slugUnik
                 }
             });
 
