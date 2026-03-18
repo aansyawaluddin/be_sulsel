@@ -493,46 +493,145 @@ export const masterStaffController = {
 
             const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
 
-            const formattedDetail = {
-                id: detailProgram.id,
-                namaProgram: detailProgram.namaProgram,
-                slug: detailProgram.slug,
-                anggaran: calculatedTotalAnggaran,
-                isPrioritas: detailProgram.isPrioritas,
-                createdAt: detailProgram.createdAt,
-                dinas: detailProgram.dinas,
-                dokumenProgram: detailProgram.dokumen,
-                pengadaanList: detailProgram.pengadaan.map(transaksi => ({
+            const DAY_MS = 24 * 60 * 60 * 1000;
+
+            const getMidnightMs = (dateInput) => {
+                const d = new Date(dateInput);
+                d.setHours(0, 0, 0, 0);
+                return d.getTime();
+            };
+
+            const addDaysMs = (ms, days) => {
+                const d = new Date(ms);
+                d.setDate(d.getDate() + days);
+                return d.getTime();
+            };
+
+            const formattedPengadaanList = detailProgram.pengadaan.map(transaksi => {
+                
+                const tahapanList = transaksi.progresTahapan.map(p => ({
+                    idTahapan: p.tahapan.id,
+                    noUrut: p.tahapan.noUrut,
+                    namaTahapan: p.tahapan.namaTahapan,
+                    standarWaktuHari: p.tahapan.standarWaktuHari,
+                    isWaktuEditable: p.tahapan.isWaktuEditable,
+                    bobot: p.tahapan.bobot,
+                    progres: {
+                        idProgres: p.id,
+                        status: p.status,
+                        planningTanggalMulai: p.planningTanggalMulai,
+                        planningTanggalSelesai: p.planningTanggalSelesai,
+                        aktualTanggalMulai: p.aktualTanggalMulai,
+                        aktualTanggalSelesai: p.aktualTanggalSelesai,
+                        keterangan: p.keterangan,
+                        dokumenBukti: p.dokumen || [],
+                        updatedAt: p.updatedAt
+                    }
+                }));
+
+                let prevEndDateMs = null; 
+
+                const tahapanWithForecast = tahapanList.map((t) => {
+                    const planStart = t.progres.planningTanggalMulai;
+                    const planEnd = t.progres.planningTanggalSelesai;
+                    const aktualStart = t.progres.aktualTanggalMulai;
+                    const aktualEnd = t.progres.aktualTanggalSelesai;
+
+                    if (!planStart || !planEnd) {
+                        return {
+                            ...t,
+                            forecast: {
+                                forecastTanggalMulai: null,
+                                forecastTanggalSelesai: null
+                            }
+                        };
+                    }
+
+                    const planStartMs = getMidnightMs(planStart);
+                    const planEndMs = getMidnightMs(planEnd);
+                    
+                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+
+                    let forecastStartMs = null;
+                    let forecastEndMs = null;
+
+                    if (aktualStart && aktualEnd) {
+                        forecastStartMs = getMidnightMs(aktualStart);
+                        forecastEndMs = getMidnightMs(aktualEnd);
+                    } 
+                    else if (aktualStart && !aktualEnd) {
+                        forecastStartMs = getMidnightMs(aktualStart);
+                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                    } 
+                    else {
+                        if (prevEndDateMs !== null) {
+                            forecastStartMs = addDaysMs(prevEndDateMs, 1); 
+                        } else {
+                            forecastStartMs = planStartMs; 
+                        }
+                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                    }
+
+                    prevEndDateMs = forecastEndMs;
+
+                    return {
+                        ...t,
+                        forecast: {
+                            forecastTanggalMulai: new Date(forecastStartMs).toISOString(),
+                            forecastTanggalSelesai: new Date(forecastEndMs).toISOString()
+                        }
+                    };
+                });
+
+                let programPlanEndMs = null;
+                let programForecastEndMs = null;
+
+                if (tahapanWithForecast.length > 0) {
+                    const lastTahapan = tahapanWithForecast[tahapanWithForecast.length - 1];
+                    programForecastEndMs = lastTahapan.forecast.forecastTanggalSelesai;
+                    
+                    tahapanWithForecast.forEach(t => {
+                        if (t.progres.planningTanggalSelesai) {
+                            const ms = getMidnightMs(t.progres.planningTanggalSelesai);
+                            if (programPlanEndMs === null || ms > programPlanEndMs) {
+                                programPlanEndMs = ms;
+                            }
+                        }
+                    });
+                }
+
+                const forecastPengadaan = {
+                    planTanggalSelesaiKeseluruhan: programPlanEndMs ? new Date(programPlanEndMs).toISOString() : null,
+                    forecastTanggalSelesaiKeseluruhan: programForecastEndMs || null
+                };
+
+                return {
                     id: transaksi.id,
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
                     title: transaksi.title,
                     anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
-                    tahapanList: transaksi.progresTahapan.map(p => ({
-                        idTahapan: p.tahapan.id,
-                        noUrut: p.tahapan.noUrut,
-                        namaTahapan: p.tahapan.namaTahapan,
-                        standarWaktuHari: p.tahapan.standarWaktuHari,
-                        isWaktuEditable: p.tahapan.isWaktuEditable,
-                        bobot: p.tahapan.bobot,
-                        progres: {
-                            idProgres: p.id,
-                            status: p.status,
-                            planningTanggalMulai: p.planningTanggalMulai,
-                            planningTanggalSelesai: p.planningTanggalSelesai,
-                            aktualTanggalMulai: p.aktualTanggalMulai,
-                            aktualTanggalSelesai: p.aktualTanggalSelesai,
-                            keterangan: p.keterangan,
-                            dokumenBukti: p.dokumen || [],
-                            updatedAt: p.updatedAt
-                        }
-                    }))
-                }))
+                    forecastKeseluruhan: forecastPengadaan,
+                    tahapanList: tahapanWithForecast
+                };
+            });
+
+            const formattedDetail = {
+                id: detailProgram.id,
+                namaProgram: detailProgram.namaProgram,
+                slug: detailProgram.slug,
+                tanggalMulai: detailProgram.tanggalMulai,
+                anggaran: calculatedTotalAnggaran,
+                isPrioritas: detailProgram.isPrioritas,
+                createdAt: detailProgram.createdAt,
+                dinas: detailProgram.dinas,
+                dokumenProgram: detailProgram.dokumen,
+                pengadaanList: formattedPengadaanList
             };
 
             res.status(200).json({
-                msg: "Berhasil mengambil detail informasi program",
+                msg: "Berhasil mengambil detail informasi program (Master Mode)",
                 data: formattedDetail
             });
 
@@ -541,7 +640,7 @@ export const masterStaffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
-
+    
     getDokumenProgram: async (req, res) => {
         try {
             const { slug } = req.params;
