@@ -496,6 +496,7 @@ export const masterStaffController = {
             const DAY_MS = 24 * 60 * 60 * 1000;
 
             const getMidnightMs = (dateInput) => {
+                if (!dateInput) return null;
                 const d = new Date(dateInput);
                 d.setHours(0, 0, 0, 0);
                 return d.getTime();
@@ -508,7 +509,7 @@ export const masterStaffController = {
             };
 
             const formattedPengadaanList = detailProgram.pengadaan.map(transaksi => {
-                
+
                 const tahapanList = transaksi.progresTahapan.map(p => ({
                     idTahapan: p.tahapan.id,
                     noUrut: p.tahapan.noUrut,
@@ -529,50 +530,58 @@ export const masterStaffController = {
                     }
                 }));
 
-                let prevEndDateMs = null; 
+                let akumulasiKeterlambatanHari = 0;
+                let maxPrevEndDateMs = null;
 
                 const tahapanWithForecast = tahapanList.map((t) => {
-                    const planStart = t.progres.planningTanggalMulai;
-                    const planEnd = t.progres.planningTanggalSelesai;
-                    const aktualStart = t.progres.aktualTanggalMulai;
-                    const aktualEnd = t.progres.aktualTanggalSelesai;
+                    const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
+                    const planEndMs = getMidnightMs(t.progres.planningTanggalSelesai);
+                    const aktualStartMs = getMidnightMs(t.progres.aktualTanggalMulai);
+                    const aktualEndMs = getMidnightMs(t.progres.aktualTanggalSelesai);
 
-                    if (!planStart || !planEnd) {
+                    if (!planStartMs || !planEndMs) {
                         return {
                             ...t,
-                            forecast: {
-                                forecastTanggalMulai: null,
-                                forecastTanggalSelesai: null
-                            }
+                            forecast: { forecastTanggalMulai: null, forecastTanggalSelesai: null }
                         };
                     }
 
-                    const planStartMs = getMidnightMs(planStart);
-                    const planEndMs = getMidnightMs(planEnd);
-                    
                     const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
 
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
-                    if (aktualStart && aktualEnd) {
-                        forecastStartMs = getMidnightMs(aktualStart);
-                        forecastEndMs = getMidnightMs(aktualEnd);
-                    } 
-                    else if (aktualStart && !aktualEnd) {
-                        forecastStartMs = getMidnightMs(aktualStart);
-                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                    } 
-                    else {
-                        if (prevEndDateMs !== null) {
-                            forecastStartMs = addDaysMs(prevEndDateMs, 1); 
-                        } else {
-                            forecastStartMs = planStartMs; 
-                        }
+                    if (aktualStartMs && aktualEndMs) {
+                        forecastStartMs = aktualStartMs;
+                        forecastEndMs = aktualEndMs;
+
+                        const aktualDurDays = Math.round((aktualEndMs - aktualStartMs) / DAY_MS);
+                        const selisihHari = aktualDurDays - planDurDays;
+
+                        akumulasiKeterlambatanHari += selisihHari;
+                    }
+                    else if (aktualStartMs && !aktualEndMs) {
+                        forecastStartMs = aktualStartMs;
                         forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                     }
+                    else {
+                        forecastStartMs = addDaysMs(planStartMs, akumulasiKeterlambatanHari);
+                        forecastEndMs = addDaysMs(planEndMs, akumulasiKeterlambatanHari);
 
-                    prevEndDateMs = forecastEndMs;
+                        if (maxPrevEndDateMs !== null && forecastStartMs <= maxPrevEndDateMs) {
+                            const prevPlusOneMs = addDaysMs(maxPrevEndDateMs, 1);
+                            const shiftExtraHari = Math.round((prevPlusOneMs - forecastStartMs) / DAY_MS);
+
+                            forecastStartMs = addDaysMs(forecastStartMs, shiftExtraHari);
+                            forecastEndMs = addDaysMs(forecastEndMs, shiftExtraHari);
+
+                            akumulasiKeterlambatanHari += shiftExtraHari;
+                        }
+                    }
+
+                    if (maxPrevEndDateMs === null || forecastEndMs > maxPrevEndDateMs) {
+                        maxPrevEndDateMs = forecastEndMs;
+                    }
 
                     return {
                         ...t,
@@ -589,7 +598,7 @@ export const masterStaffController = {
                 if (tahapanWithForecast.length > 0) {
                     const lastTahapan = tahapanWithForecast[tahapanWithForecast.length - 1];
                     programForecastEndMs = lastTahapan.forecast.forecastTanggalSelesai;
-                    
+
                     tahapanWithForecast.forEach(t => {
                         if (t.progres.planningTanggalSelesai) {
                             const ms = getMidnightMs(t.progres.planningTanggalSelesai);
@@ -640,7 +649,6 @@ export const masterStaffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
-    
     getDokumenProgram: async (req, res) => {
         try {
             const { slug } = req.params;
