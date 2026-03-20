@@ -446,8 +446,8 @@ export const staffController = {
                     }
                 }));
 
-                let akumulasiKeterlambatanHari = 0;
-                let maxPrevEndDateMs = null; 
+                let currentShiftHari = 0;
+                let maxPrevEndDateMs = null;
 
                 const tahapanWithForecast = tahapanList.map((t) => {
                     const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
@@ -462,8 +462,6 @@ export const staffController = {
                         };
                     }
 
-                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
-
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
@@ -471,19 +469,18 @@ export const staffController = {
                         forecastStartMs = aktualStartMs;
                         forecastEndMs = aktualEndMs;
 
-                        const aktualDurDays = Math.round((aktualEndMs - aktualStartMs) / DAY_MS);
-                        const selisihHari = aktualDurDays - planDurDays;
-
-                        akumulasiKeterlambatanHari += selisihHari;
+                        currentShiftHari = Math.round((aktualEndMs - planEndMs) / DAY_MS);
                     }
                     else if (aktualStartMs && !aktualEndMs) {
                         forecastStartMs = aktualStartMs;
-
+                        const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
                         forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+
+                        currentShiftHari = Math.round((forecastEndMs - planEndMs) / DAY_MS);
                     }
                     else {
-                        forecastStartMs = addDaysMs(planStartMs, akumulasiKeterlambatanHari);
-                        forecastEndMs = addDaysMs(planEndMs, akumulasiKeterlambatanHari);
+                        forecastStartMs = addDaysMs(planStartMs, currentShiftHari);
+                        forecastEndMs = addDaysMs(planEndMs, currentShiftHari);
 
                         if (maxPrevEndDateMs !== null && forecastStartMs <= maxPrevEndDateMs) {
                             const prevPlusOneMs = addDaysMs(maxPrevEndDateMs, 1);
@@ -492,7 +489,7 @@ export const staffController = {
                             forecastStartMs = addDaysMs(forecastStartMs, shiftExtraHari);
                             forecastEndMs = addDaysMs(forecastEndMs, shiftExtraHari);
 
-                            akumulasiKeterlambatanHari += shiftExtraHari;
+                            currentShiftHari += shiftExtraHari;
                         }
                     }
 
