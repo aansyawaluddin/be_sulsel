@@ -647,6 +647,7 @@ export const masterStaffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
+    
     getDokumenProgram: async (req, res) => {
         try {
             const { slug } = req.params;
