@@ -10,7 +10,11 @@ export const gubernurController = {
                 include: {
                     programs: {
                         include: {
-                            pengadaan: { select: { id: true } }
+                            pengadaan: {
+                                include: {
+                                    progresTahapan: { select: { status: true } }
+                                }
+                            }
                         }
                     }
                 },
@@ -21,11 +25,23 @@ export const gubernurController = {
 
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
-                let prioritasAktif = 0;
+                let jumlahProgramSelesai = 0;
 
                 dinas.programs.forEach(program => {
-                    if (program.isPrioritas === true && program.pengadaan.length > 0) {
-                        prioritasAktif++;
+                    if (program.pengadaan.length > 0) {
+                        let semuaTahapanSelesai = true;
+
+                        program.pengadaan.forEach(pengadaan => {
+                            pengadaan.progresTahapan.forEach(tahapan => {
+                                if (tahapan.status !== 'selesai') {
+                                    semuaTahapanSelesai = false;
+                                }
+                            });
+                        });
+
+                        if (semuaTahapanSelesai) {
+                            jumlahProgramSelesai++;
+                        }
                     }
                 });
 
@@ -34,7 +50,7 @@ export const gubernurController = {
                     namaDinas: dinas.namaDinas,
                     slug: dinas.slug,
                     totalProgram: totalPrograms,
-                    programPrioritas: prioritasAktif
+                    programPrioritas: jumlahProgramSelesai
                 };
             });
 

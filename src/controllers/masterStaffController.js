@@ -30,7 +30,13 @@ export const masterStaffController = {
             const dinasList = await prisma.dinas.findMany({
                 include: {
                     programs: {
-                        include: { pengadaan: { select: { id: true } } }
+                        include: {
+                            pengadaan: {
+                                include: {
+                                    progresTahapan: { select: { status: true } }
+                                }
+                            }
+                        }
                     }
                 },
                 orderBy: { namaDinas: 'asc' }
@@ -38,11 +44,23 @@ export const masterStaffController = {
 
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
-                let prioritasAktif = 0;
+                let jumlahProgramSelesai = 0;
 
                 dinas.programs.forEach(program => {
-                    if (program.isPrioritas === true && program.pengadaan.length > 0) {
-                        prioritasAktif++;
+                    if (program.pengadaan.length > 0) {
+                        let semuaTahapanSelesai = true;
+
+                        program.pengadaan.forEach(pengadaan => {
+                            pengadaan.progresTahapan.forEach(tahapan => {
+                                if (tahapan.status !== 'selesai') {
+                                    semuaTahapanSelesai = false;
+                                }
+                            });
+                        });
+
+                        if (semuaTahapanSelesai) {
+                            jumlahProgramSelesai++;
+                        }
                     }
                 });
 
@@ -51,7 +69,7 @@ export const masterStaffController = {
                     namaDinas: dinas.namaDinas,
                     slug: dinas.slug,
                     totalProgram: totalPrograms,
-                    programPrioritas: prioritasAktif
+                    programPrioritas: jumlahProgramSelesai
                 };
             });
 
@@ -647,7 +665,7 @@ export const masterStaffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     },
-    
+
     getDokumenProgram: async (req, res) => {
         try {
             const { slug } = req.params;
