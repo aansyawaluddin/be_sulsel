@@ -25,24 +25,28 @@ const port = process.env.PORT || 3030;
 
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://sipeka-pearl.vercel.app'
+  'https://monev-prio.vercel.app',
+  'https://www.monevprio.com',
+  'https://monevprio.com'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'CORS policy: URL ini tidak diizinkan mengakses API.';
-      return callback(new Error(msg), false);
+    console.log("Request Origin yang masuk:", origin);
+    if (!origin) {
+      return callback(null, true);
     }
-    return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    } else {
+      console.error("CORS BLOCKED untuk origin:", origin);
+      return callback(null, false);
+    }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
 }));
-
 // Middleare
 app.use(cookieParser());
 app.use(express.json());
