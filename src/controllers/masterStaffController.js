@@ -33,7 +33,17 @@ export const masterStaffController = {
                         include: {
                             pengadaan: {
                                 include: {
-                                    progresTahapan: { select: { status: true } }
+                                    progresTahapan: {
+                                        select: {
+                                            status: true,
+                                            planningTanggalMulai: true,
+                                            planningTanggalSelesai: true,
+                                            aktualTanggalMulai: true,
+                                            aktualTanggalSelesai: true,
+                                            tahapan: { select: { noUrut: true } }
+                                        },
+                                        orderBy: { tahapan: { noUrut: 'asc' } }
+                                    }
                                 }
                             }
                         }
@@ -42,24 +52,102 @@ export const masterStaffController = {
                 orderBy: { namaDinas: 'asc' }
             });
 
+            const DAY_MS = 24 * 60 * 60 * 1000;
+
+            const getMidnightMs = (dateInput) => {
+                if (!dateInput) return null;
+                const d = new Date(dateInput);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
+            };
+
+            const addDaysMs = (ms, days) => {
+                const d = new Date(ms);
+                d.setDate(d.getDate() + days);
+                return d.getTime();
+            };
+
+            const todayMs = getMidnightMs(new Date());
+
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
                 let jumlahProgramSelesai = 0;
+                let jumlahProgramTerlambat = 0;
 
                 dinas.programs.forEach(program => {
                     if (program.pengadaan.length > 0) {
                         let semuaTahapanSelesai = true;
+                        let isProgramTerlambat = false;
 
                         program.pengadaan.forEach(pengadaan => {
+                            let prevEndDateMs = null;
+                            let pengadaanPlanEndMs = null;
+                            let pengadaanSelesai = true;
+
                             pengadaan.progresTahapan.forEach(tahapan => {
                                 if (tahapan.status !== 'selesai') {
                                     semuaTahapanSelesai = false;
+                                    pengadaanSelesai = false;
                                 }
+
+                                const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
+                                const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
+                                const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
+                                const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
+
+                                if (planEndMs !== null) {
+                                    if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
+                                        pengadaanPlanEndMs = planEndMs;
+                                    }
+                                }
+
+                                if (!planStartMs || !planEndMs) return;
+
+                                const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+                                let forecastStartMs = null;
+                                let forecastEndMs = null;
+
+                                if (aktualStartMs && aktualEndMs) {
+                                    forecastStartMs = aktualStartMs;
+                                    forecastEndMs = aktualEndMs;
+                                } else if (aktualStartMs && !aktualEndMs) {
+                                    forecastStartMs = aktualStartMs;
+                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                                } else {
+                                    if (prevEndDateMs !== null) {
+                                        forecastStartMs = addDaysMs(prevEndDateMs, 1);
+                                    } else {
+                                        forecastStartMs = planStartMs;
+                                    }
+                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                                }
+                                prevEndDateMs = forecastEndMs;
                             });
+
+                            const pengadaanForecastEndMs = prevEndDateMs;
+
+                            if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
+                                if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
+                                    isProgramTerlambat = true;
+                                }
+                            }
+
+                            if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
+                                if (todayMs > pengadaanForecastEndMs) {
+                                    isProgramTerlambat = true;
+                                }
+                            }
                         });
 
                         if (semuaTahapanSelesai) {
                             jumlahProgramSelesai++;
+                            isProgramTerlambat = false;
+                        }
+
+                        if (isProgramTerlambat) {
+                            jumlahProgramTerlambat++;
                         }
                     }
                 });
@@ -69,7 +157,8 @@ export const masterStaffController = {
                     namaDinas: dinas.namaDinas,
                     slug: dinas.slug,
                     totalProgram: totalPrograms,
-                    programPrioritas: jumlahProgramSelesai
+                    programPrioritas: jumlahProgramSelesai,
+                    programTerlambat: jumlahProgramTerlambat
                 };
             });
 
@@ -79,6 +168,7 @@ export const masterStaffController = {
                 data: formattedDinas
             });
         } catch (error) {
+            console.error(`🔥 [MASTER - GET DINAS ERROR]:`, error);
             res.status(500).json({ msg: error.message });
         }
     },
@@ -448,15 +538,113 @@ export const masterStaffController = {
                     pengadaan: {
                         select: {
                             anggaran: true,
-                            pengadaan: { select: { namaPengadaan: true } }
+                            pengadaan: { select: { namaPengadaan: true } },
+                            progresTahapan: {
+                                select: {
+                                    status: true,
+                                    planningTanggalMulai: true,
+                                    planningTanggalSelesai: true,
+                                    aktualTanggalMulai: true,
+                                    aktualTanggalSelesai: true,
+                                    tahapan: { select: { noUrut: true } }
+                                },
+                                orderBy: { tahapan: { noUrut: 'asc' } }
+                            }
                         }
                     }
                 },
                 orderBy: { createdAt: 'desc' }
             });
 
+            const DAY_MS = 24 * 60 * 60 * 1000;
+            const getMidnightMs = (dateInput) => {
+                if (!dateInput) return null;
+                const d = new Date(dateInput);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
+            };
+            const addDaysMs = (ms, days) => {
+                const d = new Date(ms);
+                d.setDate(d.getDate() + days);
+                return d.getTime();
+            };
+            const todayMs = getMidnightMs(new Date());
+
             const formattedPrograms = programList.map(program => {
                 const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+
+                let semuaTahapanSelesai = true;
+                let isProgramTerlambat = false;
+
+                if (program.pengadaan.length > 0) {
+                    program.pengadaan.forEach(pengadaan => {
+                        let prevEndDateMs = null;
+                        let pengadaanPlanEndMs = null;
+                        let pengadaanSelesai = true;
+
+                        pengadaan.progresTahapan.forEach(tahapan => {
+                            if (tahapan.status !== 'selesai') {
+                                semuaTahapanSelesai = false;
+                                pengadaanSelesai = false;
+                            }
+
+                            const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
+                            const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
+                            const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
+                            const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
+
+                            if (planEndMs !== null) {
+                                if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
+                                    pengadaanPlanEndMs = planEndMs;
+                                }
+                            }
+
+                            if (!planStartMs || !planEndMs) return;
+
+                            const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+                            let forecastStartMs = null;
+                            let forecastEndMs = null;
+
+                            if (aktualStartMs && aktualEndMs) {
+                                forecastStartMs = aktualStartMs;
+                                forecastEndMs = aktualEndMs;
+                            } else if (aktualStartMs && !aktualEndMs) {
+                                forecastStartMs = aktualStartMs;
+                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                            } else {
+                                if (prevEndDateMs !== null) {
+                                    forecastStartMs = addDaysMs(prevEndDateMs, 1);
+                                } else {
+                                    forecastStartMs = planStartMs;
+                                }
+                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                            }
+                            prevEndDateMs = forecastEndMs;
+                        });
+
+                        const pengadaanForecastEndMs = prevEndDateMs;
+
+                        if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
+                            if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
+                                isProgramTerlambat = true;
+                            }
+                        }
+
+                        if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
+                            if (todayMs > pengadaanForecastEndMs) {
+                                isProgramTerlambat = true;
+                            }
+                        }
+                    });
+
+                    if (semuaTahapanSelesai) {
+                        isProgramTerlambat = false;
+                    }
+                } else {
+                    semuaTahapanSelesai = false;
+                }
 
                 return {
                     id: program.id,
@@ -466,7 +654,9 @@ export const masterStaffController = {
                     status: program.status,
                     isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
-                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
+                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
+                    isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
+                    isTerlambat: isProgramTerlambat
                 }
             });
 
