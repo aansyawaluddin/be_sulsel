@@ -167,15 +167,13 @@ export const gubernurController = {
                     id: true,
                     namaProgram: true,
                     slug: true,
+                    isPrioritas: true,
+                    status: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
                             anggaran: true,
-                            pengadaan: {
-                                select: {
-                                    namaPengadaan: true
-                                }
-                            },
+                            pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
                                 select: {
                                     status: true,
@@ -183,16 +181,20 @@ export const gubernurController = {
                                     planningTanggalSelesai: true,
                                     aktualTanggalMulai: true,
                                     aktualTanggalSelesai: true,
-                                    tahapan: { select: { noUrut: true } }
+                                    keterangan: true,
+                                    tahapan: {
+                                        select: {
+                                            noUrut: true,
+                                            namaTahapan: true
+                                        }
+                                    }
                                 },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
                         }
                     }
                 },
-                orderBy: {
-                    createdAt: 'desc'
-                }
+                orderBy: { createdAt: 'desc' }
             });
 
             const DAY_MS = 24 * 60 * 60 * 1000;
@@ -216,14 +218,28 @@ export const gubernurController = {
 
                 let semuaTahapanSelesai = true;
                 let isProgramTerlambat = false;
+                let currentTahapanNama = "Belum Mulai";
+                let currentTahapanKeterangan = null;
 
                 if (program.pengadaan.length > 0) {
+
+                    let foundActiveTahapan = false;
+
                     program.pengadaan.forEach(pengadaan => {
                         let prevEndDateMs = null;
                         let pengadaanPlanEndMs = null;
                         let pengadaanSelesai = true;
 
                         pengadaan.progresTahapan.forEach(tahapan => {
+                            if (!foundActiveTahapan && tahapan.status === 'on_progress') {
+                                currentTahapanNama = tahapan.tahapan.namaTahapan;
+                                if (tahapan.keterangan && Array.isArray(tahapan.keterangan) && tahapan.keterangan.length > 0) {
+                                    const latestKet = tahapan.keterangan[tahapan.keterangan.length - 1];
+                                    currentTahapanKeterangan = latestKet.catatan;
+                                }
+                                foundActiveTahapan = true;
+                            }
+
                             if (tahapan.status !== 'selesai') {
                                 semuaTahapanSelesai = false;
                                 pengadaanSelesai = false;
@@ -280,6 +296,7 @@ export const gubernurController = {
 
                     if (semuaTahapanSelesai) {
                         isProgramTerlambat = false;
+                        currentTahapanNama = "Selesai Keseluruhan";
                     }
                 } else {
                     semuaTahapanSelesai = false;
@@ -290,11 +307,15 @@ export const gubernurController = {
                     namaProgram: program.namaProgram,
                     slug: program.slug,
                     anggaran: calculatedAnggaran,
+                    status: program.status,
+                    isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
                     isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
-                    isTerlambat: isProgramTerlambat
-                };
+                    isTerlambat: isProgramTerlambat,
+                    tahapanSaatIni: currentTahapanNama,
+                    keteranganSaatIni: currentTahapanKeterangan
+                }
             });
 
             res.status(200).json({
