@@ -671,6 +671,43 @@ export const masterStaffController = {
         }
     },
 
+    toggleLockPlanning: async (req, res) => {
+        try {
+            const { slug } = req.params;
+
+            const programEksis = await prisma.program.findUnique({
+                where: { slug: slug }
+            });
+
+            if (!programEksis) {
+                return res.status(404).json({ msg: "Program tidak ditemukan." });
+            }
+
+            const statusBaru = !programEksis.isPlanningLocked;
+
+            const programDiupdate = await prisma.program.update({
+                where: { slug: slug },
+                data: { isPlanningLocked: statusBaru },
+                select: {
+                    id: true,
+                    namaProgram: true,
+                    isPlanningLocked: true
+                }
+            });
+
+            const statusTeks = statusBaru ? "DIKUNCI" : "DIBUKA";
+
+            res.status(200).json({
+                msg: `Berhasil! Jadwal Planning untuk program '${programDiupdate.namaProgram}' telah ${statusTeks}.`,
+                data: programDiupdate
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - TOGGLE LOCK PLANNING ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     getDetailProgram: async (req, res) => {
         try {
             const { slug } = req.params;

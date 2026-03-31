@@ -795,6 +795,12 @@ export const staffController = {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
 
+            if (progresEksis.transaksi.program.isPlanningLocked === true) {
+                return res.status(403).json({
+                    msg: "Akses Ditolak: Jadwal (Planning) program ini telah DIKUNCI oleh Master Staff dan tidak dapat diubah lagi."
+                });
+            }
+
             const result = await prisma.$transaction(async (tx) => {
                 const dataUpdate = {};
 
