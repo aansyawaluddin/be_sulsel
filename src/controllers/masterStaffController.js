@@ -73,7 +73,8 @@ export const masterStaffController = {
 
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
-                let jumlahProgramSelesai = 0;
+
+                let jumlahProgramDikerjakan = 0;
                 let jumlahProgramTerlambat = 0;
 
                 dinas.programs.forEach(program => {
@@ -81,12 +82,19 @@ export const masterStaffController = {
                         let semuaTahapanSelesai = true;
                         let isProgramTerlambat = false;
 
+                        let sudahDikerjakan = false;
+
                         program.pengadaan.forEach(pengadaan => {
                             let prevEndDateMs = null;
                             let pengadaanPlanEndMs = null;
                             let pengadaanSelesai = true;
 
                             pengadaan.progresTahapan.forEach(tahapan => {
+
+                                if (tahapan.aktualTanggalMulai !== null || tahapan.aktualTanggalSelesai !== null) {
+                                    sudahDikerjakan = true;
+                                }
+
                                 if (tahapan.status !== 'selesai') {
                                     semuaTahapanSelesai = false;
                                     pengadaanSelesai = false;
@@ -142,8 +150,11 @@ export const masterStaffController = {
                         });
 
                         if (semuaTahapanSelesai) {
-                            jumlahProgramSelesai++;
                             isProgramTerlambat = false;
+                        }
+
+                        if (sudahDikerjakan) {
+                            jumlahProgramDikerjakan++;
                         }
 
                         if (isProgramTerlambat) {
@@ -157,7 +168,7 @@ export const masterStaffController = {
                     namaDinas: dinas.namaDinas,
                     slug: dinas.slug,
                     totalProgram: totalPrograms,
-                    programPrioritas: jumlahProgramSelesai,
+                    programPrioritas: jumlahProgramDikerjakan,
                     programTerlambat: jumlahProgramTerlambat
                 };
             });
@@ -1272,7 +1283,12 @@ export const masterStaffController = {
     getInbox: async (req, res) => {
         try {
             const inboxList = await prisma.program.findMany({
-                include: {
+                select: {
+                    id: true,
+                    namaProgram: true,
+                    slug: true,
+                    status: true,
+                    createdAt: true,
                     dinas: {
                         select: { namaDinas: true }
                     },
@@ -1287,7 +1303,13 @@ export const masterStaffController = {
             });
 
             const formattedInbox = inboxList.map(program => {
-                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+                let calculatedAnggaran = 0;
+                let pengadaanNamas = [];
+
+                for (let i = 0; i < program.pengadaan.length; i++) {
+                    calculatedAnggaran += Number(program.pengadaan[i].anggaran);
+                    pengadaanNamas.push(program.pengadaan[i].pengadaan.namaPengadaan);
+                }
 
                 return {
                     id: program.id,
@@ -1297,10 +1319,11 @@ export const masterStaffController = {
                     status: program.status,
                     totalAnggaran: calculatedAnggaran,
                     tanggalPengajuan: program.createdAt,
-                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
+                    pengadaanList: pengadaanNamas
                 }
             });
 
+            // Format Response TETAP SAMA seperti permintaan Anda
             res.status(200).json({
                 msg: "Berhasil mengambil seluruh riwayat program (Semua Status)",
                 totalData: formattedInbox.length,

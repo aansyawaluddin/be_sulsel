@@ -54,7 +54,8 @@ export const gubernurController = {
 
             const formattedDinas = dinasList.map(dinas => {
                 const totalPrograms = dinas.programs.length;
-                let jumlahProgramSelesai = 0;
+
+                let jumlahProgramDikerjakan = 0;
                 let jumlahProgramTerlambat = 0;
 
                 dinas.programs.forEach(program => {
@@ -62,12 +63,19 @@ export const gubernurController = {
                         let semuaTahapanSelesai = true;
                         let isProgramTerlambat = false;
 
+                        let sudahDikerjakan = false;
+
                         program.pengadaan.forEach(pengadaan => {
                             let prevEndDateMs = null;
                             let pengadaanPlanEndMs = null;
                             let pengadaanSelesai = true;
 
                             pengadaan.progresTahapan.forEach(tahapan => {
+
+                                if (tahapan.aktualTanggalMulai !== null || tahapan.aktualTanggalSelesai !== null) {
+                                    sudahDikerjakan = true;
+                                }
+
                                 if (tahapan.status !== 'selesai') {
                                     semuaTahapanSelesai = false;
                                     pengadaanSelesai = false;
@@ -123,9 +131,13 @@ export const gubernurController = {
                         });
 
                         if (semuaTahapanSelesai) {
-                            jumlahProgramSelesai++;
                             isProgramTerlambat = false;
                         }
+
+                        if (sudahDikerjakan) {
+                            jumlahProgramDikerjakan++;
+                        }
+
                         if (isProgramTerlambat) {
                             jumlahProgramTerlambat++;
                         }
@@ -137,7 +149,7 @@ export const gubernurController = {
                     namaDinas: dinas.namaDinas,
                     slug: dinas.slug,
                     totalProgram: totalPrograms,
-                    programPrioritas: jumlahProgramSelesai,
+                    programPrioritas: jumlahProgramDikerjakan,
                     programTerlambat: jumlahProgramTerlambat
                 };
             });
