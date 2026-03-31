@@ -671,6 +671,44 @@ export const masterStaffController = {
         }
     },
 
+    deleteProgramDiterima: async (req, res) => {
+        try {
+            const { slug } = req.params;
+
+            const programTarget = await prisma.program.findUnique({
+                where: { slug: slug },
+                include: { dinas: true }
+            });
+
+            if (!programTarget) {
+                return res.status(404).json({ msg: "Program tidak ditemukan." });
+            }
+
+            if (programTarget.status !== 'terima') {
+                return res.status(400).json({
+                    msg: `Penghapusan ditolak: Fitur ini khusus untuk menghapus program yang berstatus 'terima' (Sudah di-ACC). Status program ini adalah '${programTarget.status}'.`
+                });
+            }
+
+            await prisma.program.delete({
+                where: { slug: slug }
+            });
+
+            const targetDir = path.join('public', 'uploads', programTarget.slug);
+            if (fs.existsSync(targetDir)) {
+                fs.rmSync(targetDir, { recursive: true, force: true });
+            }
+
+            res.status(200).json({
+                msg: `Program '${programTarget.namaProgram}' (Milik ${programTarget.dinas?.namaDinas}) yang sebelumnya telah di-ACC, berhasil dihapus secara permanen beserta seluruh file dokumennya.`,
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - DELETE PROGRAM DITERIMA ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     toggleLockPlanning: async (req, res) => {
         try {
             const { slug } = req.params;

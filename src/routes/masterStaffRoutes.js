@@ -22,6 +22,9 @@ router.delete('/staff/:id', masterStaffController.deleteStaff);
 // List DInas
 router.get('/dinas', masterStaffController.getDinas);
 
+// menghapus program yang sudah di ACC
+router.delete('/program/:slug/diterima', verifyToken, masterStaffController.deleteProgramDiterima);
+
 // Kunci/Buka Kunci Planning
 router.patch('/program/:slug/toggle-lock', verifyToken, masterStaffController.toggleLockPlanning);
 
