@@ -837,6 +837,7 @@ export const staffController = {
                 anggaran: calculatedTotalAnggaran,
                 status: detailProgram.status,
                 isPrioritas: detailProgram.isPrioritas,
+                isPlanningLocked: detailProgram.isPlanningLocked,
                 createdAt: detailProgram.createdAt,
                 dinas: detailProgram.dinas,
                 dokumenProgram: detailProgram.dokumen,

@@ -914,6 +914,7 @@ export const masterStaffController = {
                 tanggalMulai: detailProgram.tanggalMulai,
                 anggaran: calculatedTotalAnggaran,
                 isPrioritas: detailProgram.isPrioritas,
+                isPlanningLocked: detailProgram.isPlanningLocked,
                 createdAt: detailProgram.createdAt,
                 dinas: detailProgram.dinas,
                 dokumenProgram: detailProgram.dokumen,
