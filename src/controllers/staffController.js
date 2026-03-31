@@ -482,10 +482,8 @@ export const staffController = {
     updateProgram: async (req, res) => {
         try {
             const { id } = req.params;
-            const { namaProgram } = req.body;
+            const { namaProgram, tanggalMulai, pengadaanList } = req.body;
             const dinasId = req.user.dinasId;
-
-            if (!namaProgram) return res.status(400).json({ msg: "Nama Program baru wajib diisi." });
 
             const programEksis = await prisma.program.findUnique({
                 where: { id: parseInt(id) }
@@ -498,23 +496,111 @@ export const staffController = {
             }
 
             if (programEksis.status !== 'menunggu') {
-                return res.status(403).json({ msg: "Akses Ditolak: Program yang sudah divalidasi tidak dapat diubah namanya." });
+                return res.status(403).json({
+                    msg: "Akses Ditolak: Program yang sudah divalidasi (Diterima/Ditolak) tidak dapat diubah rinciannya lagi."
+                });
             }
 
-            const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-            const slugUnik = `${baseSlug}`;
+            const result = await prisma.$transaction(async (tx) => {
+                const dataUpdate = {};
 
-            const programDiupdate = await prisma.program.update({
-                where: { id: parseInt(id) },
-                data: {
-                    namaProgram: namaProgram,
-                    slug: slugUnik
+                if (namaProgram) {
+                    dataUpdate.namaProgram = namaProgram;
+                    const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+                    dataUpdate.slug = `${baseSlug}`;
                 }
+
+                if (tanggalMulai !== undefined) {
+                    dataUpdate.tanggalMulai = tanggalMulai ? new Date(tanggalMulai) : null;
+                }
+
+                const programDiupdate = await tx.program.update({
+                    where: { id: parseInt(id) },
+                    data: dataUpdate
+                });
+
+                if (pengadaanList && Array.isArray(pengadaanList)) {
+
+                    await tx.transaksiPengadaan.deleteMany({
+                        where: { programId: parseInt(id) }
+                    });
+
+                    for (const item of pengadaanList) {
+                        if (!item.anggaran) throw new Error(`Anggaran wajib diisi untuk pengadaan: ${item.title}`);
+
+                        const masterPengadaan = await tx.pengadaan.findUnique({
+                            where: { id: parseInt(item.pengadaanId) }
+                        });
+
+                        if (!masterPengadaan) throw new Error(`Pengadaan ID ${item.pengadaanId} tidak ditemukan`);
+
+                        const transaksi = await tx.transaksiPengadaan.create({
+                            data: {
+                                namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programDiupdate.namaProgram}`,
+                                title: item.title || "Tanpa Judul Spesifik",
+                                anggaran: BigInt(item.anggaran),
+                                programId: programDiupdate.id,
+                                pengadaanId: masterPengadaan.id
+                            }
+                        });
+
+                        const masterTahapanList = await tx.tahapan.findMany({
+                            where: { pengadaanId: masterPengadaan.id },
+                            orderBy: { noUrut: 'asc' }
+                        });
+
+                        let estimasiTanggalMulai;
+
+                        const tglMulaiAcuan = tanggalMulai !== undefined ? tanggalMulai : programEksis.tanggalMulai;
+
+                        if (tglMulaiAcuan) {
+                            estimasiTanggalMulai = new Date(tglMulaiAcuan);
+                            estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                        } else {
+                            estimasiTanggalMulai = new Date();
+                            estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                            estimasiTanggalMulai.setHours(0, 0, 0, 0);
+                        }
+
+                        const dataProgres = [];
+
+                        for (const tahapan of masterTahapanList) {
+                            let tanggalMulaiSekarang = new Date(estimasiTanggalMulai);
+                            let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
+
+                            let durasiHari = tahapan.standarWaktuHari;
+                            if (tahapan.isWaktuEditable && durasiHari === null) {
+                                durasiHari = 14;
+                            } else if (durasiHari === null) {
+                                durasiHari = 1;
+                            }
+
+                            tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
+
+                            dataProgres.push({
+                                transaksiId: transaksi.id,
+                                tahapanId: tahapan.id,
+                                status: 'on_progress',
+                                planningTanggalMulai: tanggalMulaiSekarang,
+                                planningTanggalSelesai: tanggalSelesaiSekarang
+                            });
+
+                            estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
+                            estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                        }
+
+                        if (dataProgres.length > 0) {
+                            await tx.progresTahapan.createMany({ data: dataProgres });
+                        }
+                    }
+                }
+
+                return programDiupdate;
             });
 
             res.status(200).json({
-                msg: "Berhasil mengubah nama program beserta link URL-nya.",
-                data: programDiupdate
+                msg: "Berhasil memperbarui data program secara keseluruhan.",
+                data: result
             });
 
         } catch (error) {
