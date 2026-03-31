@@ -338,9 +338,12 @@ export const staffController = {
                     slug: true,
                     isPrioritas: true,
                     status: true,
+                    tanggalMulai: true, // 👈 Ditambahkan
                     createdAt: true,
                     pengadaan: {
                         select: {
+                            id: true,
+                            title: true,
                             anggaran: true,
                             pengadaan: {
                                 select: { namaPengadaan: true }
@@ -352,7 +355,13 @@ export const staffController = {
                                     planningTanggalSelesai: true,
                                     aktualTanggalMulai: true,
                                     aktualTanggalSelesai: true,
-                                    tahapan: { select: { noUrut: true } }
+                                    keterangan: true,
+                                    tahapan: {
+                                        select: {
+                                            noUrut: true,
+                                            namaTahapan: true
+                                        }
+                                    }
                                 },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
@@ -385,14 +394,28 @@ export const staffController = {
 
                 let semuaTahapanSelesai = true;
                 let isProgramTerlambat = false;
+                let currentTahapanNama = "Belum Mulai";
+                let currentTahapanKeterangan = null;
 
                 if (program.pengadaan.length > 0) {
+
+                    let foundActiveTahapan = false;
+
                     program.pengadaan.forEach(pengadaan => {
                         let prevEndDateMs = null;
                         let pengadaanPlanEndMs = null;
                         let pengadaanSelesai = true;
 
                         pengadaan.progresTahapan.forEach(tahapan => {
+                            if (!foundActiveTahapan && tahapan.status === 'on_progress') {
+                                currentTahapanNama = tahapan.tahapan.namaTahapan;
+                                if (tahapan.keterangan && Array.isArray(tahapan.keterangan) && tahapan.keterangan.length > 0) {
+                                    const latestKet = tahapan.keterangan[tahapan.keterangan.length - 1];
+                                    currentTahapanKeterangan = latestKet.catatan;
+                                }
+                                foundActiveTahapan = true;
+                            }
+
                             if (tahapan.status !== 'selesai') {
                                 semuaTahapanSelesai = false;
                                 pengadaanSelesai = false;
@@ -449,22 +472,33 @@ export const staffController = {
 
                     if (semuaTahapanSelesai) {
                         isProgramTerlambat = false;
+                        currentTahapanNama = "Selesai Keseluruhan";
                     }
                 } else {
                     semuaTahapanSelesai = false;
                 }
 
+                const detailPengadaanList = program.pengadaan.map(p => ({
+                    id: p.id,
+                    metode: p.pengadaan.namaPengadaan,
+                    title: p.title,
+                    anggaran: Number(p.anggaran)
+                }));
+
                 return {
                     id: program.id,
                     namaProgram: program.namaProgram,
                     slug: program.slug,
+                    tanggalMulai: program.tanggalMulai,
                     anggaran: calculatedAnggaran,
                     isPrioritas: program.isPrioritas,
                     status: program.status,
                     createdAt: program.createdAt,
-                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
+                    pengadaanList: detailPengadaanList,
                     isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
-                    isTerlambat: isProgramTerlambat
+                    isTerlambat: isProgramTerlambat,
+                    tahapanSaatIni: currentTahapanNama,
+                    keteranganSaatIni: currentTahapanKeterangan
                 };
             });
 
