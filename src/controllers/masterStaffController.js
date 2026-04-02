@@ -545,6 +545,7 @@ export const masterStaffController = {
                     slug: true,
                     isPrioritas: true,
                     status: true,
+                    isPlanningLocked: true,
                     createdAt: true,
                     pengadaan: {
                         select: {
@@ -664,6 +665,7 @@ export const masterStaffController = {
                     anggaran: calculatedAnggaran,
                     status: program.status,
                     isPrioritas: program.isPrioritas,
+                    isPlanningLocked: program.isPlanningLocked,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
                     isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
