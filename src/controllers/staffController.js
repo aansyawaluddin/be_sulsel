@@ -783,8 +783,7 @@ export const staffController = {
                     }
                 }));
 
-                let currentShiftHari = 0;
-                let maxPrevEndDateMs = null;
+                let prevEndDateMs = null;
 
                 const tahapanWithForecast = tahapanList.map((t) => {
                     const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
@@ -799,40 +798,29 @@ export const staffController = {
                         };
                     }
 
+                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
                     if (aktualStartMs && aktualEndMs) {
                         forecastStartMs = aktualStartMs;
                         forecastEndMs = aktualEndMs;
-
-                        currentShiftHari = Math.round((aktualEndMs - planEndMs) / DAY_MS);
                     }
                     else if (aktualStartMs && !aktualEndMs) {
                         forecastStartMs = aktualStartMs;
-                        const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
                         forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-
-                        currentShiftHari = Math.round((forecastEndMs - planEndMs) / DAY_MS);
                     }
                     else {
-                        forecastStartMs = addDaysMs(planStartMs, currentShiftHari);
-                        forecastEndMs = addDaysMs(planEndMs, currentShiftHari);
-
-                        if (maxPrevEndDateMs !== null && forecastStartMs <= maxPrevEndDateMs) {
-                            const prevPlusOneMs = addDaysMs(maxPrevEndDateMs, 1);
-                            const shiftExtraHari = Math.round((prevPlusOneMs - forecastStartMs) / DAY_MS);
-
-                            forecastStartMs = addDaysMs(forecastStartMs, shiftExtraHari);
-                            forecastEndMs = addDaysMs(forecastEndMs, shiftExtraHari);
-
-                            currentShiftHari += shiftExtraHari;
+                        if (prevEndDateMs !== null) {
+                            forecastStartMs = addDaysMs(prevEndDateMs, 1);
+                        } else {
+                            forecastStartMs = planStartMs;
                         }
+                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                     }
 
-                    if (maxPrevEndDateMs === null || forecastEndMs > maxPrevEndDateMs) {
-                        maxPrevEndDateMs = forecastEndMs;
-                    }
+                    prevEndDateMs = forecastEndMs;
 
                     return {
                         ...t,
@@ -842,7 +830,6 @@ export const staffController = {
                         }
                     };
                 });
-
 
                 let programPlanEndMs = null;
                 let programForecastEndMs = null;
@@ -868,6 +855,7 @@ export const staffController = {
 
                 return {
                     id: transaksi.id,
+                    pengadaanId: transaksi.pengadaanId,
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
                     title: transaksi.title,

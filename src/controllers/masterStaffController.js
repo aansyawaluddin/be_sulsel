@@ -766,11 +766,15 @@ export const masterStaffController = {
             const detailProgram = await prisma.program.findUnique({
                 where: { slug: slug },
                 include: {
-                    dinas: { select: { namaDinas: true } },
+                    dinas: {
+                        select: { namaDinas: true }
+                    },
                     dokumen: true,
                     pengadaan: {
                         include: {
-                            pengadaan: { select: { namaPengadaan: true } },
+                            pengadaan: {
+                                select: { namaPengadaan: true }
+                            },
                             progresTahapan: {
                                 include: {
                                     tahapan: true,
@@ -826,8 +830,7 @@ export const masterStaffController = {
                     }
                 }));
 
-                let currentShiftHari = 0;
-                let maxPrevEndDateMs = null;
+                let prevEndDateMs = null;
 
                 const tahapanWithForecast = tahapanList.map((t) => {
                     const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
@@ -842,40 +845,29 @@ export const masterStaffController = {
                         };
                     }
 
+                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
                     if (aktualStartMs && aktualEndMs) {
                         forecastStartMs = aktualStartMs;
                         forecastEndMs = aktualEndMs;
-
-                        currentShiftHari = Math.round((aktualEndMs - planEndMs) / DAY_MS);
                     }
                     else if (aktualStartMs && !aktualEndMs) {
                         forecastStartMs = aktualStartMs;
-                        const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
                         forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-
-                        currentShiftHari = Math.round((forecastEndMs - planEndMs) / DAY_MS);
                     }
                     else {
-                        forecastStartMs = addDaysMs(planStartMs, currentShiftHari);
-                        forecastEndMs = addDaysMs(planEndMs, currentShiftHari);
-
-                        if (maxPrevEndDateMs !== null && forecastStartMs <= maxPrevEndDateMs) {
-                            const prevPlusOneMs = addDaysMs(maxPrevEndDateMs, 1);
-                            const shiftExtraHari = Math.round((prevPlusOneMs - forecastStartMs) / DAY_MS);
-
-                            forecastStartMs = addDaysMs(forecastStartMs, shiftExtraHari);
-                            forecastEndMs = addDaysMs(forecastEndMs, shiftExtraHari);
-
-                            currentShiftHari += shiftExtraHari;
+                        if (prevEndDateMs !== null) {
+                            forecastStartMs = addDaysMs(prevEndDateMs, 1);
+                        } else {
+                            forecastStartMs = planStartMs;
                         }
+                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                     }
 
-                    if (maxPrevEndDateMs === null || forecastEndMs > maxPrevEndDateMs) {
-                        maxPrevEndDateMs = forecastEndMs;
-                    }
+                    prevEndDateMs = forecastEndMs;
 
                     return {
                         ...t,
