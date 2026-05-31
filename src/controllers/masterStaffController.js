@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import prisma from '../utils/prisma.js';
 import bcrypt from 'bcrypt';
+import {
+    DAY_MS,
+    getMidnightMs,
+    addDaysMs,
+    hitungForecastPengadaan
+} from '../utils/dateHelper.js';
 
 export const masterStaffController = {
 
@@ -28,156 +34,113 @@ export const masterStaffController = {
             const { role, username } = req.user;
 
             const dinasList = await prisma.dinas.findMany({
-                include: {
-                    programs: {
-                        include: {
-                            pengadaan: {
-                                include: {
-                                    progresTahapan: {
-                                        select: {
-                                            status: true,
-                                            planningTanggalMulai: true,
-                                            planningTanggalSelesai: true,
-                                            aktualTanggalMulai: true,
-                                            aktualTanggalSelesai: true,
-                                            tahapan: { select: { noUrut: true } }
-                                        },
-                                        orderBy: { tahapan: { noUrut: 'asc' } }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                select: {
+                    id: true,
+                    namaDinas: true,
+                    slug: true,
+                    _count: { select: { programs: true } }
                 },
                 orderBy: { namaDinas: 'asc' }
             });
 
-            const DAY_MS = 24 * 60 * 60 * 1000;
-
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                const year = d.getFullYear();
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
-            };
-
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
+            const allProgresData = await prisma.progresTahapan.findMany({
+                where: {
+                    transaksi: {
+                        program: {
+                            dinasId: { in: dinasList.map(d => d.id) }
+                        }
+                    }
+                },
+                select: {
+                    status: true,
+                    aktualTanggalMulai: true,
+                    aktualTanggalSelesai: true,
+                    planningTanggalMulai: true,
+                    planningTanggalSelesai: true,
+                    transaksi: {
+                        select: {
+                            id: true,
+                            programId: true,
+                            program: {
+                                select: {
+                                    id: true,
+                                    dinasId: true
+                                }
+                            }
+                        }
+                    }
+                }
+            });
 
             const todayMs = getMidnightMs(new Date());
 
-            const formattedDinas = dinasList.map(dinas => {
-                const totalPrograms = dinas.programs.length;
+            const dinasStats = Object.fromEntries(
+                dinasList.map(d => [d.id, { dikerjakan: 0, terlambat: 0 }])
+            );
 
-                let jumlahProgramDikerjakan = 0;
-                let jumlahProgramTerlambat = 0;
+            const transaksiMap = {};
+            for (const progres of allProgresData) {
+                const { id: tId, programId, program } = progres.transaksi;
+                if (!transaksiMap[tId]) {
+                    transaksiMap[tId] = { programId, dinasId: program.dinasId, tahapanList: [] };
+                }
+                transaksiMap[tId].tahapanList.push(progres);
+            }
 
-                dinas.programs.forEach(program => {
-                    if (program.pengadaan.length > 0) {
-                        let semuaTahapanSelesai = true;
-                        let isProgramTerlambat = false;
+            const programMap = {};
+            for (const { programId, dinasId, tahapanList } of Object.values(transaksiMap)) {
+                if (!programMap[programId]) {
+                    programMap[programId] = { dinasId, transaksiList: [] };
+                }
+                programMap[programId].transaksiList.push(tahapanList);
+            }
 
-                        let sudahDikerjakan = false;
+            for (const { dinasId, transaksiList } of Object.values(programMap)) {
+                let semuaProgramSelesai = true;
+                let isProgramTerlambat = false;
+                let sudahDikerjakan = false;
 
-                        program.pengadaan.forEach(pengadaan => {
-                            let prevEndDateMs = null;
-                            let pengadaanPlanEndMs = null;
-                            let pengadaanSelesai = true;
+                for (const tahapanList of transaksiList) {
+                    const { forecastEndMs, planEndMs, pengadaanSelesai, semuaSelesai } =
+                        hitungForecastPengadaan(tahapanList);
 
-                            pengadaan.progresTahapan.forEach(tahapan => {
-
-                                if (tahapan.aktualTanggalMulai !== null || tahapan.aktualTanggalSelesai !== null) {
-                                    sudahDikerjakan = true;
-                                }
-
-                                if (tahapan.status !== 'selesai') {
-                                    semuaTahapanSelesai = false;
-                                    pengadaanSelesai = false;
-                                }
-
-                                const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
-                                const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
-                                const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
-                                const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
-
-                                if (planEndMs !== null) {
-                                    if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
-                                        pengadaanPlanEndMs = planEndMs;
-                                    }
-                                }
-
-                                if (!planStartMs || !planEndMs) return;
-
-                                const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
-                                let forecastStartMs = null;
-                                let forecastEndMs = null;
-
-                                if (aktualStartMs && aktualEndMs) {
-                                    forecastStartMs = aktualStartMs;
-                                    forecastEndMs = aktualEndMs;
-                                } else if (aktualStartMs && !aktualEndMs) {
-                                    forecastStartMs = aktualStartMs;
-                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                                } else {
-                                    if (prevEndDateMs !== null) {
-                                        forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                                    } else {
-                                        forecastStartMs = planStartMs;
-                                    }
-                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                                }
-                                prevEndDateMs = forecastEndMs;
-                            });
-
-                            const pengadaanForecastEndMs = prevEndDateMs;
-
-                            if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
-                                if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
-                                    isProgramTerlambat = true;
-                                }
-                            }
-
-                            if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
-                                if (todayMs > pengadaanForecastEndMs) {
-                                    isProgramTerlambat = true;
-                                }
-                            }
-                        });
-
-                        if (semuaTahapanSelesai) {
-                            isProgramTerlambat = false;
-                        }
-
-                        if (sudahDikerjakan) {
-                            jumlahProgramDikerjakan++;
-                        }
-
-                        if (isProgramTerlambat) {
-                            jumlahProgramTerlambat++;
-                        }
+                    if (tahapanList.some(t =>
+                        t.aktualTanggalMulai !== null || t.aktualTanggalSelesai !== null
+                    )) {
+                        sudahDikerjakan = true;
                     }
-                });
 
-                return {
-                    id: dinas.id,
-                    namaDinas: dinas.namaDinas,
-                    slug: dinas.slug,
-                    totalProgram: totalPrograms,
-                    programPrioritas: jumlahProgramDikerjakan,
-                    programTerlambat: jumlahProgramTerlambat
-                };
-            });
+                    if (!semuaSelesai) semuaProgramSelesai = false;
+
+                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
+                        isProgramTerlambat = true;
+                    }
+
+                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
+                        isProgramTerlambat = true;
+                    }
+                }
+
+                if (semuaProgramSelesai) isProgramTerlambat = false;
+                if (sudahDikerjakan) dinasStats[dinasId].dikerjakan++;
+                if (isProgramTerlambat) dinasStats[dinasId].terlambat++;
+            }
+
+            const formattedDinas = dinasList.map(dinas => ({
+                id: dinas.id,
+                namaDinas: dinas.namaDinas,
+                slug: dinas.slug,
+                totalProgram: dinas._count.programs,
+                programPrioritas: dinasStats[dinas.id]?.dikerjakan ?? 0,
+                programTerlambat: dinasStats[dinas.id]?.terlambat ?? 0
+            }));
 
             res.status(200).json({
                 msg: "Berhasil mengambil data seluruh instansi/dinas",
                 user: { username, role },
                 data: formattedDinas
             });
+
         } catch (error) {
             console.error(`🔥 [MASTER - GET DINAS ERROR]:`, error);
             res.status(500).json({ msg: error.message });
@@ -216,13 +179,8 @@ export const masterStaffController = {
     getDinasDropdown: async (req, res) => {
         try {
             const dinasList = await prisma.dinas.findMany({
-                select: {
-                    id: true,
-                    namaDinas: true
-                },
-                orderBy: {
-                    namaDinas: 'asc'
-                }
+                select: { id: true, namaDinas: true },
+                orderBy: { namaDinas: 'asc' }
             });
 
             res.status(200).json({
@@ -255,7 +213,10 @@ export const masterStaffController = {
                 }
             });
 
-            res.status(201).json({ msg: "Berhasil membuat akun Staff", data: { username: staffBaru.username, name: staffBaru.name } });
+            res.status(201).json({
+                msg: "Berhasil membuat akun Staff",
+                data: { username: staffBaru.username, name: staffBaru.name }
+            });
         } catch (error) {
             res.status(500).json({ msg: error.message });
         }
@@ -265,7 +226,13 @@ export const masterStaffController = {
         try {
             const staffList = await prisma.user.findMany({
                 where: { role: 'staff' },
-                select: { id: true, username: true, name: true, dinas: { select: { namaDinas: true } }, createdAt: true }
+                select: {
+                    id: true,
+                    username: true,
+                    name: true,
+                    dinas: { select: { namaDinas: true } },
+                    createdAt: true
+                }
             });
             res.status(200).json({ msg: "Berhasil mengambil data staff", data: staffList });
         } catch (error) {
@@ -313,7 +280,6 @@ export const masterStaffController = {
             const existingUser = await prisma.user.findUnique({
                 where: { id: parseInt(id) }
             });
-
 
             if (!existingUser || existingUser.role !== 'staff') {
                 return res.status(404).json({ msg: "Data Staff tidak ditemukan." });
@@ -368,13 +334,8 @@ export const masterStaffController = {
     getPengadaan: async (req, res) => {
         try {
             const pengadaanList = await prisma.pengadaan.findMany({
-                select: {
-                    id: true,
-                    namaPengadaan: true
-                },
-                orderBy: {
-                    id: 'asc'
-                }
+                select: { id: true, namaPengadaan: true },
+                orderBy: { id: 'asc' }
             });
 
             res.status(200).json({
@@ -435,7 +396,6 @@ export const masterStaffController = {
                     });
 
                     let estimasiTanggalMulai;
-
                     if (tanggalMulai) {
                         estimasiTanggalMulai = new Date(tanggalMulai);
                         estimasiTanggalMulai.setHours(0, 0, 0, 0);
@@ -446,7 +406,6 @@ export const masterStaffController = {
                     }
 
                     const dataProgres = [];
-
                     for (const tahapan of masterTahapanList) {
                         let tanggalMulaiSekarang = new Date(estimasiTanggalMulai);
                         let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
@@ -510,7 +469,7 @@ export const masterStaffController = {
 
             if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
 
-            const dataUpdate = { namaProgram: namaProgram };
+            const dataUpdate = { namaProgram };
 
             if (programEksis.status === 'menunggu') {
                 const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
@@ -538,7 +497,7 @@ export const masterStaffController = {
             const { slug } = req.params;
 
             const programList = await prisma.program.findMany({
-                where: { dinas: { slug: slug } },
+                where: { dinas: { slug } },
                 select: {
                     id: true,
                     namaProgram: true,
@@ -568,94 +527,35 @@ export const masterStaffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
-            const DAY_MS = 24 * 60 * 60 * 1000;
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                const year = d.getFullYear();
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
-            };
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
             const todayMs = getMidnightMs(new Date());
 
             const formattedPrograms = programList.map(program => {
-                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+                const calculatedAnggaran = program.pengadaan.reduce(
+                    (sum, p) => sum + Number(p.anggaran), 0
+                );
 
                 let semuaTahapanSelesai = true;
                 let isProgramTerlambat = false;
 
-                if (program.pengadaan.length > 0) {
-                    program.pengadaan.forEach(pengadaan => {
-                        let prevEndDateMs = null;
-                        let pengadaanPlanEndMs = null;
-                        let pengadaanSelesai = true;
-
-                        pengadaan.progresTahapan.forEach(tahapan => {
-                            if (tahapan.status !== 'selesai') {
-                                semuaTahapanSelesai = false;
-                                pengadaanSelesai = false;
-                            }
-
-                            const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
-                            const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
-                            const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
-                            const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
-
-                            if (planEndMs !== null) {
-                                if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
-                                    pengadaanPlanEndMs = planEndMs;
-                                }
-                            }
-
-                            if (!planStartMs || !planEndMs) return;
-
-                            const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
-                            let forecastStartMs = null;
-                            let forecastEndMs = null;
-
-                            if (aktualStartMs && aktualEndMs) {
-                                forecastStartMs = aktualStartMs;
-                                forecastEndMs = aktualEndMs;
-                            } else if (aktualStartMs && !aktualEndMs) {
-                                forecastStartMs = aktualStartMs;
-                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                            } else {
-                                if (prevEndDateMs !== null) {
-                                    forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                                } else {
-                                    forecastStartMs = planStartMs;
-                                }
-                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                            }
-                            prevEndDateMs = forecastEndMs;
-                        });
-
-                        const pengadaanForecastEndMs = prevEndDateMs;
-
-                        if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
-                            if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
-                                isProgramTerlambat = true;
-                            }
-                        }
-
-                        if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
-                            if (todayMs > pengadaanForecastEndMs) {
-                                isProgramTerlambat = true;
-                            }
-                        }
-                    });
-
-                    if (semuaTahapanSelesai) {
-                        isProgramTerlambat = false;
-                    }
-                } else {
+                if (program.pengadaan.length === 0) {
                     semuaTahapanSelesai = false;
+                } else {
+                    for (const pengadaan of program.pengadaan) {
+                        const { forecastEndMs, planEndMs, pengadaanSelesai, semuaSelesai } =
+                            hitungForecastPengadaan(pengadaan.progresTahapan);
+
+                        if (!semuaSelesai) semuaTahapanSelesai = false;
+
+                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
+                            isProgramTerlambat = true;
+                        }
+
+                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
+                            isProgramTerlambat = true;
+                        }
+                    }
+
+                    if (semuaTahapanSelesai) isProgramTerlambat = false;
                 }
 
                 return {
@@ -668,9 +568,9 @@ export const masterStaffController = {
                     isPlanningLocked: program.isPlanningLocked,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
-                    isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
+                    isSelesai: semuaTahapanSelesai,
                     isTerlambat: isProgramTerlambat
-                }
+                };
             });
 
             res.status(200).json({
@@ -689,7 +589,7 @@ export const masterStaffController = {
             const { slug } = req.params;
 
             const programTarget = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 include: { dinas: true }
             });
 
@@ -703,9 +603,7 @@ export const masterStaffController = {
                 });
             }
 
-            await prisma.program.delete({
-                where: { slug: slug }
-            });
+            await prisma.program.delete({ where: { slug } });
 
             const targetDir = path.join('public', 'uploads', programTarget.slug);
             if (fs.existsSync(targetDir)) {
@@ -713,7 +611,7 @@ export const masterStaffController = {
             }
 
             res.status(200).json({
-                msg: `Program '${programTarget.namaProgram}' (Milik ${programTarget.dinas?.namaDinas}) yang sebelumnya telah di-ACC, berhasil dihapus secara permanen beserta seluruh file dokumennya.`,
+                msg: `Program '${programTarget.namaProgram}' (Milik ${programTarget.dinas?.namaDinas}) yang sebelumnya telah di-ACC, berhasil dihapus secara permanen beserta seluruh file dokumennya.`
             });
 
         } catch (error) {
@@ -727,7 +625,7 @@ export const masterStaffController = {
             const { slug } = req.params;
 
             const programEksis = await prisma.program.findUnique({
-                where: { slug: slug }
+                where: { slug }
             });
 
             if (!programEksis) {
@@ -737,13 +635,9 @@ export const masterStaffController = {
             const statusBaru = !programEksis.isPlanningLocked;
 
             const programDiupdate = await prisma.program.update({
-                where: { slug: slug },
+                where: { slug },
                 data: { isPlanningLocked: statusBaru },
-                select: {
-                    id: true,
-                    namaProgram: true,
-                    isPlanningLocked: true
-                }
+                select: { id: true, namaProgram: true, isPlanningLocked: true }
             });
 
             const statusTeks = statusBaru ? "DIKUNCI" : "DIBUKA";
@@ -764,17 +658,13 @@ export const masterStaffController = {
             const { slug } = req.params;
 
             const detailProgram = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 include: {
-                    dinas: {
-                        select: { namaDinas: true }
-                    },
+                    dinas: { select: { namaDinas: true } },
                     dokumen: true,
                     pengadaan: {
                         include: {
-                            pengadaan: {
-                                select: { namaPengadaan: true }
-                            },
+                            pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
                                 include: {
                                     tahapan: true,
@@ -791,114 +681,76 @@ export const masterStaffController = {
                 return res.status(404).json({ msg: "Program tidak ditemukan." });
             }
 
-            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
-
-            const DAY_MS = 24 * 60 * 60 * 1000;
-
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                d.setHours(0, 0, 0, 0);
-                return d.getTime();
-            };
-
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
+            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce(
+                (sum, p) => sum + Number(p.anggaran), 0
+            );
 
             const formattedPengadaanList = detailProgram.pengadaan.map(transaksi => {
-
-                const tahapanList = transaksi.progresTahapan.map(p => ({
-                    idTahapan: p.tahapan.id,
-                    noUrut: p.tahapan.noUrut,
-                    namaTahapan: p.tahapan.namaTahapan,
-                    standarWaktuHari: p.tahapan.standarWaktuHari,
-                    isWaktuEditable: p.tahapan.isWaktuEditable,
-                    bobot: p.tahapan.bobot,
-                    progres: {
-                        idProgres: p.id,
-                        status: p.status,
-                        planningTanggalMulai: p.planningTanggalMulai,
-                        planningTanggalSelesai: p.planningTanggalSelesai,
-                        aktualTanggalMulai: p.aktualTanggalMulai,
-                        aktualTanggalSelesai: p.aktualTanggalSelesai,
-                        keterangan: p.keterangan,
-                        dokumenBukti: p.dokumen || [],
-                        updatedAt: p.updatedAt
-                    }
-                }));
-
                 let prevEndDateMs = null;
 
-                const tahapanWithForecast = tahapanList.map((t) => {
-                    const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
-                    const planEndMs = getMidnightMs(t.progres.planningTanggalSelesai);
-                    const aktualStartMs = getMidnightMs(t.progres.aktualTanggalMulai);
-                    const aktualEndMs = getMidnightMs(t.progres.aktualTanggalSelesai);
-
-                    if (!planStartMs || !planEndMs) {
-                        return {
-                            ...t,
-                            forecast: { forecastTanggalMulai: null, forecastTanggalSelesai: null }
-                        };
-                    }
-
-                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+                const tahapanWithForecast = transaksi.progresTahapan.map(p => {
+                    const planStartMs = getMidnightMs(p.planningTanggalMulai);
+                    const planEndMs = getMidnightMs(p.planningTanggalSelesai);
+                    const aktualStartMs = getMidnightMs(p.aktualTanggalMulai);
+                    const aktualEndMs = getMidnightMs(p.aktualTanggalSelesai);
 
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
-                    if (aktualStartMs && aktualEndMs) {
-                        forecastStartMs = aktualStartMs;
-                        forecastEndMs = aktualEndMs;
-                    }
-                    else if (aktualStartMs && !aktualEndMs) {
-                        forecastStartMs = aktualStartMs;
-                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                    }
-                    else {
-                        if (prevEndDateMs !== null) {
-                            forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                        } else {
-                            forecastStartMs = planStartMs;
-                        }
-                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                    }
+                    if (planStartMs && planEndMs) {
+                        const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
 
-                    prevEndDateMs = forecastEndMs;
+                        if (aktualStartMs && aktualEndMs) {
+                            forecastStartMs = aktualStartMs;
+                            forecastEndMs = aktualEndMs;
+                        } else if (aktualStartMs) {
+                            forecastStartMs = aktualStartMs;
+                            forecastEndMs = addDaysMs(aktualStartMs, planDurDays);
+                        } else {
+                            forecastStartMs = prevEndDateMs !== null
+                                ? addDaysMs(prevEndDateMs, 1)
+                                : planStartMs;
+                            forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                        }
+
+                        prevEndDateMs = forecastEndMs;
+                    }
 
                     return {
-                        ...t,
+                        idTahapan: p.tahapan.id,
+                        noUrut: p.tahapan.noUrut,
+                        namaTahapan: p.tahapan.namaTahapan,
+                        standarWaktuHari: p.tahapan.standarWaktuHari,
+                        isWaktuEditable: p.tahapan.isWaktuEditable,
+                        bobot: p.tahapan.bobot,
+                        progres: {
+                            idProgres: p.id,
+                            status: p.status,
+                            planningTanggalMulai: p.planningTanggalMulai,
+                            planningTanggalSelesai: p.planningTanggalSelesai,
+                            aktualTanggalMulai: p.aktualTanggalMulai,
+                            aktualTanggalSelesai: p.aktualTanggalSelesai,
+                            keterangan: p.keterangan,
+                            dokumenBukti: p.dokumen ?? [],
+                            updatedAt: p.updatedAt
+                        },
                         forecast: {
-                            forecastTanggalMulai: new Date(forecastStartMs).toISOString(),
-                            forecastTanggalSelesai: new Date(forecastEndMs).toISOString()
+                            forecastTanggalMulai: forecastStartMs
+                                ? new Date(forecastStartMs).toISOString()
+                                : null,
+                            forecastTanggalSelesai: forecastEndMs
+                                ? new Date(forecastEndMs).toISOString()
+                                : null
                         }
                     };
                 });
 
-                let programPlanEndMs = null;
-                let programForecastEndMs = null;
+                const planEndMs = tahapanWithForecast.reduce((max, t) => {
+                    const ms = getMidnightMs(t.progres.planningTanggalSelesai);
+                    return ms && ms > max ? ms : max;
+                }, null);
 
-                if (tahapanWithForecast.length > 0) {
-                    const lastTahapan = tahapanWithForecast[tahapanWithForecast.length - 1];
-                    programForecastEndMs = lastTahapan.forecast.forecastTanggalSelesai;
-
-                    tahapanWithForecast.forEach(t => {
-                        if (t.progres.planningTanggalSelesai) {
-                            const ms = getMidnightMs(t.progres.planningTanggalSelesai);
-                            if (programPlanEndMs === null || ms > programPlanEndMs) {
-                                programPlanEndMs = ms;
-                            }
-                        }
-                    });
-                }
-
-                const forecastPengadaan = {
-                    planTanggalSelesaiKeseluruhan: programPlanEndMs ? new Date(programPlanEndMs).toISOString() : null,
-                    forecastTanggalSelesaiKeseluruhan: programForecastEndMs || null
-                };
+                const lastForecast = tahapanWithForecast.at(-1)?.forecast.forecastTanggalSelesai;
 
                 return {
                     id: transaksi.id,
@@ -907,28 +759,31 @@ export const masterStaffController = {
                     title: transaksi.title,
                     anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
-                    forecastKeseluruhan: forecastPengadaan,
+                    forecastKeseluruhan: {
+                        planTanggalSelesaiKeseluruhan: planEndMs
+                            ? new Date(planEndMs).toISOString()
+                            : null,
+                        forecastTanggalSelesaiKeseluruhan: lastForecast ?? null
+                    },
                     tahapanList: tahapanWithForecast
                 };
             });
 
-            const formattedDetail = {
-                id: detailProgram.id,
-                namaProgram: detailProgram.namaProgram,
-                slug: detailProgram.slug,
-                tanggalMulai: detailProgram.tanggalMulai,
-                anggaran: calculatedTotalAnggaran,
-                isPrioritas: detailProgram.isPrioritas,
-                isPlanningLocked: detailProgram.isPlanningLocked,
-                createdAt: detailProgram.createdAt,
-                dinas: detailProgram.dinas,
-                dokumenProgram: detailProgram.dokumen,
-                pengadaanList: formattedPengadaanList
-            };
-
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program (Master Mode)",
-                data: formattedDetail
+                data: {
+                    id: detailProgram.id,
+                    namaProgram: detailProgram.namaProgram,
+                    slug: detailProgram.slug,
+                    tanggalMulai: detailProgram.tanggalMulai,
+                    anggaran: calculatedTotalAnggaran,
+                    isPrioritas: detailProgram.isPrioritas,
+                    isPlanningLocked: detailProgram.isPlanningLocked,
+                    createdAt: detailProgram.createdAt,
+                    dinas: detailProgram.dinas,
+                    dokumenProgram: detailProgram.dokumen,
+                    pengadaanList: formattedPengadaanList
+                }
             });
 
         } catch (error) {
@@ -942,7 +797,7 @@ export const masterStaffController = {
             const { slug } = req.params;
 
             const program = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 select: { id: true }
             });
 
@@ -975,9 +830,7 @@ export const masterStaffController = {
                 where: { id: parseInt(progresId) },
                 include: {
                     tahapan: true,
-                    transaksi: {
-                        include: { program: true }
-                    }
+                    transaksi: { include: { program: true } }
                 }
             });
 
@@ -1007,9 +860,7 @@ export const masterStaffController = {
                     const tahapanSelanjutnya = await tx.progresTahapan.findMany({
                         where: {
                             transaksiId: progresEksis.transaksiId,
-                            tahapan: {
-                                noUrut: { gt: progresEksis.tahapan.noUrut }
-                            }
+                            tahapan: { noUrut: { gt: progresEksis.tahapan.noUrut } }
                         },
                         include: { tahapan: true },
                         orderBy: { tahapan: { noUrut: 'asc' } }
@@ -1019,13 +870,11 @@ export const masterStaffController = {
                         let currentEndDate = new Date(dataUpdate.planningTanggalSelesai);
 
                         for (const nextProgres of tahapanSelanjutnya) {
-
                             let pMulai = new Date(currentEndDate);
                             pMulai.setDate(pMulai.getDate() + 1);
                             pMulai.setHours(0, 0, 0, 0);
 
                             let durasiHari = nextProgres.tahapan.standarWaktuHari;
-
                             if (durasiHari === null) {
                                 if (nextProgres.planningTanggalMulai && nextProgres.planningTanggalSelesai) {
                                     const diffTime = nextProgres.planningTanggalSelesai.getTime() - nextProgres.planningTanggalMulai.getTime();
@@ -1041,10 +890,7 @@ export const masterStaffController = {
 
                             await tx.progresTahapan.update({
                                 where: { id: nextProgres.id },
-                                data: {
-                                    planningTanggalMulai: pMulai,
-                                    planningTanggalSelesai: pSelesai
-                                }
+                                data: { planningTanggalMulai: pMulai, planningTanggalSelesai: pSelesai }
                             });
 
                             currentEndDate = new Date(pSelesai);
@@ -1069,22 +915,13 @@ export const masterStaffController = {
     updateAktualTahapan: async (req, res) => {
         try {
             const { progresId } = req.params;
-
-            const {
-                aktualTanggalMulai,
-                aktualTanggalSelesai,
-                keterangan
-            } = req.body;
+            const { aktualTanggalMulai, aktualTanggalSelesai, keterangan } = req.body;
 
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
                 include: {
                     tahapan: true,
-                    transaksi: {
-                        include: {
-                            program: true
-                        }
-                    }
+                    transaksi: { include: { program: true } }
                 }
             });
 
@@ -1097,7 +934,6 @@ export const masterStaffController = {
             }
 
             const result = await prisma.$transaction(async (tx) => {
-
                 const dataUpdate = {};
 
                 if (keterangan && keterangan.trim() !== "") {
@@ -1106,8 +942,7 @@ export const masterStaffController = {
                     if (progresEksis.keterangan) {
                         if (Array.isArray(progresEksis.keterangan)) {
                             daftarKeterangan = progresEksis.keterangan;
-                        }
-                        else if (typeof progresEksis.keterangan === 'string') {
+                        } else if (typeof progresEksis.keterangan === 'string') {
                             daftarKeterangan.push({
                                 catatan: progresEksis.keterangan,
                                 tanggal: progresEksis.updatedAt.toISOString(),
@@ -1132,9 +967,7 @@ export const masterStaffController = {
 
                 if (aktualTanggalSelesai) {
                     const dateSelesai = new Date(aktualTanggalSelesai);
-                    if (!isNaN(dateSelesai.getTime())) {
-                        dataUpdate.aktualTanggalSelesai = dateSelesai;
-                    }
+                    if (!isNaN(dateSelesai.getTime())) dataUpdate.aktualTanggalSelesai = dateSelesai;
                 }
 
                 await tx.progresTahapan.update({
@@ -1144,7 +977,6 @@ export const masterStaffController = {
 
                 if (req.files && req.files.length > 0) {
                     const programSlug = progresEksis.transaksi.program.slug;
-
                     const targetDir = path.join('public', 'uploads', programSlug);
 
                     if (!fs.existsSync(targetDir)) {
@@ -1154,9 +986,7 @@ export const masterStaffController = {
                     const dataDokumen = req.files.map(file => {
                         const oldPath = file.path;
                         const newPath = path.join(targetDir, file.filename);
-
                         fs.renameSync(oldPath, newPath);
-
                         return {
                             progresTahapanId: parseInt(progresId),
                             namaFile: file.originalname,
@@ -1164,17 +994,13 @@ export const masterStaffController = {
                         };
                     });
 
-                    await tx.dokumenProgresTahapan.createMany({
-                        data: dataDokumen
-                    });
+                    await tx.dokumenProgresTahapan.createMany({ data: dataDokumen });
                 }
 
-                const progresTerbaru = await tx.progresTahapan.findUnique({
+                return await tx.progresTahapan.findUnique({
                     where: { id: parseInt(progresId) },
                     include: { dokumen: true }
                 });
-
-                return progresTerbaru;
             });
 
             res.status(200).json({
@@ -1224,9 +1050,7 @@ export const masterStaffController = {
         try {
             const { slug } = req.params;
 
-            const program = await prisma.program.findFirst({
-                where: { slug: slug }
-            });
+            const program = await prisma.program.findFirst({ where: { slug } });
 
             if (!program) {
                 return res.status(404).json({ msg: "Program tidak ditemukan." });
@@ -1244,9 +1068,7 @@ export const masterStaffController = {
             const dataDokumen = req.files.map(file => {
                 const oldPath = file.path;
                 const newPath = path.join(targetDir, file.filename);
-
                 fs.renameSync(oldPath, newPath);
-
                 return {
                     programId: program.id,
                     namaFile: file.originalname,
@@ -1254,9 +1076,7 @@ export const masterStaffController = {
                 };
             });
 
-            await prisma.dokumenProgram.createMany({
-                data: dataDokumen
-            });
+            await prisma.dokumenProgram.createMany({ data: dataDokumen });
 
             const dokumenTerbaru = await prisma.dokumenProgram.findMany({
                 where: { programId: program.id },
@@ -1283,9 +1103,7 @@ export const masterStaffController = {
                     slug: true,
                     status: true,
                     createdAt: true,
-                    dinas: {
-                        select: { namaDinas: true }
-                    },
+                    dinas: { select: { namaDinas: true } },
                     pengadaan: {
                         select: {
                             anggaran: true,
@@ -1297,13 +1115,9 @@ export const masterStaffController = {
             });
 
             const formattedInbox = inboxList.map(program => {
-                let calculatedAnggaran = 0;
-                let pengadaanNamas = [];
-
-                for (let i = 0; i < program.pengadaan.length; i++) {
-                    calculatedAnggaran += Number(program.pengadaan[i].anggaran);
-                    pengadaanNamas.push(program.pengadaan[i].pengadaan.namaPengadaan);
-                }
+                const calculatedAnggaran = program.pengadaan.reduce(
+                    (sum, p) => sum + Number(p.anggaran), 0
+                );
 
                 return {
                     id: program.id,
@@ -1313,11 +1127,10 @@ export const masterStaffController = {
                     status: program.status,
                     totalAnggaran: calculatedAnggaran,
                     tanggalPengajuan: program.createdAt,
-                    pengadaanList: pengadaanNamas
-                }
+                    pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan)
+                };
             });
 
-            // Format Response TETAP SAMA seperti permintaan Anda
             res.status(200).json({
                 msg: "Berhasil mengambil seluruh riwayat program (Semua Status)",
                 totalData: formattedInbox.length,
@@ -1334,20 +1147,20 @@ export const masterStaffController = {
         try {
             const { slug } = req.params;
 
-            const programTarget = await prisma.program.findUnique({
-                where: { slug: slug }
-            });
+            const programTarget = await prisma.program.findUnique({ where: { slug } });
 
             if (!programTarget) {
                 return res.status(404).json({ msg: "Program tidak ditemukan." });
             }
 
             if (programTarget.status !== 'menunggu') {
-                return res.status(400).json({ msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}` });
+                return res.status(400).json({
+                    msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}`
+                });
             }
 
             const programDiterima = await prisma.program.update({
-                where: { slug: slug },
+                where: { slug },
                 data: { status: 'terima' },
                 select: {
                     id: true,
@@ -1372,8 +1185,9 @@ export const masterStaffController = {
     tolakProgram: async (req, res) => {
         try {
             const { slug } = req.params;
+
             const programTarget = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 include: { dinas: true }
             });
 
@@ -1382,12 +1196,12 @@ export const masterStaffController = {
             }
 
             if (programTarget.status !== 'menunggu') {
-                return res.status(400).json({ msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}` });
+                return res.status(400).json({
+                    msg: `Program ini sudah pernah divalidasi dengan status: ${programTarget.status}`
+                });
             }
 
-            await prisma.program.delete({
-                where: { slug: slug }
-            });
+            await prisma.program.delete({ where: { slug } });
 
             const targetDir = path.join('public', 'uploads', programTarget.slug);
             if (fs.existsSync(targetDir)) {
@@ -1407,4 +1221,4 @@ export const masterStaffController = {
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
     }
-}
+};

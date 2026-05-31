@@ -1,4 +1,10 @@
 import prisma from '../utils/prisma.js';
+import {
+    DAY_MS,
+    getMidnightMs,
+    addDaysMs,
+    hitungForecastPengadaan
+} from '../utils/dateHelper.js';
 
 export const gubernurController = {
 
@@ -7,159 +13,119 @@ export const gubernurController = {
             const { role, username } = req.user;
 
             const dinasList = await prisma.dinas.findMany({
-                include: {
-                    programs: {
-                        include: {
-                            pengadaan: {
-                                include: {
-                                    progresTahapan: {
-                                        select: {
-                                            status: true,
-                                            planningTanggalMulai: true,
-                                            planningTanggalSelesai: true,
-                                            aktualTanggalMulai: true,
-                                            aktualTanggalSelesai: true,
-                                            tahapan: { select: { noUrut: true } }
-                                        },
-                                        orderBy: { tahapan: { noUrut: 'asc' } }
-                                    }
+                select: {
+                    id: true,
+                    namaDinas: true,
+                    slug: true,
+                    _count: { select: { programs: true } }
+                },
+                orderBy: { namaDinas: 'asc' }
+            });
+
+            const allProgresData = await prisma.progresTahapan.findMany({
+                where: {
+                    transaksi: {
+                        program: {
+                            dinasId: { in: dinasList.map(d => d.id) }
+                        }
+                    }
+                },
+                select: {
+                    status: true,
+                    aktualTanggalMulai: true,
+                    aktualTanggalSelesai: true,
+                    planningTanggalMulai: true,
+                    planningTanggalSelesai: true,
+                    transaksi: {
+                        select: {
+                            id: true,
+                            programId: true,
+                            program: {
+                                select: {
+                                    id: true,
+                                    dinasId: true
                                 }
                             }
                         }
                     }
-                },
-                orderBy: {
-                    namaDinas: 'asc'
                 }
             });
 
-            const DAY_MS = 24 * 60 * 60 * 1000;
-
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                const year = d.getFullYear();
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
-            };
-
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
-
             const todayMs = getMidnightMs(new Date());
 
-            const formattedDinas = dinasList.map(dinas => {
-                const totalPrograms = dinas.programs.length;
+            const dinasStats = Object.fromEntries(
+                dinasList.map(d => [d.id, { dikerjakan: 0, terlambat: 0 }])
+            );
 
-                let jumlahProgramDikerjakan = 0;
-                let jumlahProgramTerlambat = 0;
+            const transaksiMap = {};
+            for (const progres of allProgresData) {
+                const { id: tId, programId, program } = progres.transaksi;
+                if (!transaksiMap[tId]) {
+                    transaksiMap[tId] = {
+                        programId,
+                        dinasId: program.dinasId,
+                        tahapanList: []
+                    };
+                }
+                transaksiMap[tId].tahapanList.push(progres);
+            }
 
-                dinas.programs.forEach(program => {
-                    if (program.pengadaan.length > 0) {
-                        let semuaTahapanSelesai = true;
-                        let isProgramTerlambat = false;
+            const programMap = {};
+            for (const { programId, dinasId, tahapanList } of Object.values(transaksiMap)) {
+                if (!programMap[programId]) {
+                    programMap[programId] = { dinasId, transaksiList: [] };
+                }
+                programMap[programId].transaksiList.push(tahapanList);
+            }
 
-                        let sudahDikerjakan = false;
+            for (const { dinasId, transaksiList } of Object.values(programMap)) {
+                let semuaProgramSelesai = true;
+                let isProgramTerlambat = false;
+                let sudahDikerjakan = false;
 
-                        program.pengadaan.forEach(pengadaan => {
-                            let prevEndDateMs = null;
-                            let pengadaanPlanEndMs = null;
-                            let pengadaanSelesai = true;
+                for (const tahapanList of transaksiList) {
+                    const {
+                        forecastEndMs,
+                        planEndMs,
+                        pengadaanSelesai,
+                        semuaSelesai
+                    } = hitungForecastPengadaan(tahapanList);
 
-                            pengadaan.progresTahapan.forEach(tahapan => {
-
-                                if (tahapan.aktualTanggalMulai !== null || tahapan.aktualTanggalSelesai !== null) {
-                                    sudahDikerjakan = true;
-                                }
-
-                                if (tahapan.status !== 'selesai') {
-                                    semuaTahapanSelesai = false;
-                                    pengadaanSelesai = false;
-                                }
-
-                                const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
-                                const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
-                                const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
-                                const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
-
-                                if (planEndMs !== null) {
-                                    if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
-                                        pengadaanPlanEndMs = planEndMs;
-                                    }
-                                }
-
-                                if (!planStartMs || !planEndMs) return;
-
-                                const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
-                                let forecastStartMs = null;
-                                let forecastEndMs = null;
-
-                                if (aktualStartMs && aktualEndMs) {
-                                    forecastStartMs = aktualStartMs;
-                                    forecastEndMs = aktualEndMs;
-                                } else if (aktualStartMs && !aktualEndMs) {
-                                    forecastStartMs = aktualStartMs;
-                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                                } else {
-                                    if (prevEndDateMs !== null) {
-                                        forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                                    } else {
-                                        forecastStartMs = planStartMs;
-                                    }
-                                    forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                                }
-                                prevEndDateMs = forecastEndMs;
-                            });
-
-                            const pengadaanForecastEndMs = prevEndDateMs;
-
-                            if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
-                                if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
-                                    isProgramTerlambat = true;
-                                }
-                            }
-
-                            if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
-                                if (todayMs > pengadaanForecastEndMs) {
-                                    isProgramTerlambat = true;
-                                }
-                            }
-                        });
-
-                        if (semuaTahapanSelesai) {
-                            isProgramTerlambat = false;
-                        }
-
-                        if (sudahDikerjakan) {
-                            jumlahProgramDikerjakan++;
-                        }
-
-                        if (isProgramTerlambat) {
-                            jumlahProgramTerlambat++;
-                        }
+                    if (tahapanList.some(t =>
+                        t.aktualTanggalMulai !== null || t.aktualTanggalSelesai !== null
+                    )) {
+                        sudahDikerjakan = true;
                     }
-                });
 
-                return {
-                    id: dinas.id,
-                    namaDinas: dinas.namaDinas,
-                    slug: dinas.slug,
-                    totalProgram: totalPrograms,
-                    programPrioritas: jumlahProgramDikerjakan,
-                    programTerlambat: jumlahProgramTerlambat
-                };
-            });
+                    if (!semuaSelesai) semuaProgramSelesai = false;
+
+                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
+                        isProgramTerlambat = true;
+                    }
+
+                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
+                        isProgramTerlambat = true;
+                    }
+                }
+
+                // Kalau semua tahapan selesai, tidak mungkin terlambat
+                if (semuaProgramSelesai) isProgramTerlambat = false;
+                if (sudahDikerjakan) dinasStats[dinasId].dikerjakan++;
+                if (isProgramTerlambat) dinasStats[dinasId].terlambat++;
+            }
+
+            const formattedDinas = dinasList.map(dinas => ({
+                id: dinas.id,
+                namaDinas: dinas.namaDinas,
+                slug: dinas.slug,
+                totalProgram: dinas._count.programs,
+                programPrioritas: dinasStats[dinas.id]?.dikerjakan ?? 0,
+                programTerlambat: dinasStats[dinas.id]?.terlambat ?? 0
+            }));
 
             res.status(200).json({
                 msg: "Berhasil mengambil data seluruh instansi/dinas",
-                user: {
-                    username: username,
-                    role: role
-                },
+                user: { username, role },
                 data: formattedDinas
             });
 
@@ -173,8 +139,9 @@ export const gubernurController = {
         try {
             const { slug } = req.params;
 
+            // Query ringan: ambil program + anggaran + nama tahapan aktif saja
             const programList = await prisma.program.findMany({
-                where: { dinas: { slug: slug } },
+                where: { dinas: { slug } },
                 select: {
                     id: true,
                     namaProgram: true,
@@ -195,10 +162,7 @@ export const gubernurController = {
                                     aktualTanggalSelesai: true,
                                     keterangan: true,
                                     tahapan: {
-                                        select: {
-                                            noUrut: true,
-                                            namaTahapan: true
-                                        }
+                                        select: { noUrut: true, namaTahapan: true }
                                     }
                                 },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
@@ -209,109 +173,61 @@ export const gubernurController = {
                 orderBy: { createdAt: 'desc' }
             });
 
-            const DAY_MS = 24 * 60 * 60 * 1000;
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                const year = d.getFullYear();
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return new Date(`${year}-${month}-${day}T00:00:00.000Z`).getTime();
-            };
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
             const todayMs = getMidnightMs(new Date());
 
             const formattedPrograms = programList.map(program => {
-                const calculatedAnggaran = program.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
+                const calculatedAnggaran = program.pengadaan.reduce(
+                    (sum, p) => sum + Number(p.anggaran), 0
+                );
 
                 let semuaTahapanSelesai = true;
                 let isProgramTerlambat = false;
                 let currentTahapanNama = "Belum Mulai";
                 let currentTahapanKeterangan = null;
 
-                if (program.pengadaan.length > 0) {
-
+                if (program.pengadaan.length === 0) {
+                    semuaTahapanSelesai = false;
+                } else {
                     let foundActiveTahapan = false;
 
-                    program.pengadaan.forEach(pengadaan => {
-                        let prevEndDateMs = null;
-                        let pengadaanPlanEndMs = null;
-                        let pengadaanSelesai = true;
-
-                        pengadaan.progresTahapan.forEach(tahapan => {
-                            if (!foundActiveTahapan && tahapan.status === 'on_progress') {
-                                currentTahapanNama = tahapan.tahapan.namaTahapan;
-                                if (tahapan.keterangan && Array.isArray(tahapan.keterangan) && tahapan.keterangan.length > 0) {
-                                    const latestKet = tahapan.keterangan[tahapan.keterangan.length - 1];
-                                    currentTahapanKeterangan = latestKet.catatan;
+                    for (const pengadaan of program.pengadaan) {
+                        // Cari tahapan aktif untuk ditampilkan
+                        if (!foundActiveTahapan) {
+                            const activeTahapan = pengadaan.progresTahapan.find(
+                                t => t.status === 'on_progress'
+                            );
+                            if (activeTahapan) {
+                                currentTahapanNama = activeTahapan.tahapan.namaTahapan;
+                                const ket = activeTahapan.keterangan;
+                                if (Array.isArray(ket) && ket.length > 0) {
+                                    currentTahapanKeterangan = ket[ket.length - 1].catatan;
                                 }
                                 foundActiveTahapan = true;
                             }
-
-                            if (tahapan.status !== 'selesai') {
-                                semuaTahapanSelesai = false;
-                                pengadaanSelesai = false;
-                            }
-
-                            const planStartMs = getMidnightMs(tahapan.planningTanggalMulai);
-                            const planEndMs = getMidnightMs(tahapan.planningTanggalSelesai);
-                            const aktualStartMs = getMidnightMs(tahapan.aktualTanggalMulai);
-                            const aktualEndMs = getMidnightMs(tahapan.aktualTanggalSelesai);
-
-                            if (planEndMs !== null) {
-                                if (pengadaanPlanEndMs === null || planEndMs > pengadaanPlanEndMs) {
-                                    pengadaanPlanEndMs = planEndMs;
-                                }
-                            }
-
-                            if (!planStartMs || !planEndMs) return;
-
-                            const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
-                            let forecastStartMs = null;
-                            let forecastEndMs = null;
-
-                            if (aktualStartMs && aktualEndMs) {
-                                forecastStartMs = aktualStartMs;
-                                forecastEndMs = aktualEndMs;
-                            } else if (aktualStartMs && !aktualEndMs) {
-                                forecastStartMs = aktualStartMs;
-                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                            } else {
-                                if (prevEndDateMs !== null) {
-                                    forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                                } else {
-                                    forecastStartMs = planStartMs;
-                                }
-                                forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                            }
-                            prevEndDateMs = forecastEndMs;
-                        });
-
-                        const pengadaanForecastEndMs = prevEndDateMs;
-
-                        if (pengadaanForecastEndMs !== null && pengadaanPlanEndMs !== null) {
-                            if (pengadaanForecastEndMs > pengadaanPlanEndMs) {
-                                isProgramTerlambat = true;
-                            }
                         }
 
-                        if (!pengadaanSelesai && pengadaanForecastEndMs !== null) {
-                            if (todayMs > pengadaanForecastEndMs) {
-                                isProgramTerlambat = true;
-                            }
+                        const {
+                            forecastEndMs,
+                            planEndMs,
+                            pengadaanSelesai,
+                            semuaSelesai
+                        } = hitungForecastPengadaan(pengadaan.progresTahapan);
+
+                        if (!semuaSelesai) semuaTahapanSelesai = false;
+
+                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
+                            isProgramTerlambat = true;
                         }
-                    });
+
+                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
+                            isProgramTerlambat = true;
+                        }
+                    }
 
                     if (semuaTahapanSelesai) {
                         isProgramTerlambat = false;
                         currentTahapanNama = "Selesai Keseluruhan";
                     }
-                } else {
-                    semuaTahapanSelesai = false;
                 }
 
                 return {
@@ -323,11 +239,11 @@ export const gubernurController = {
                     isPrioritas: program.isPrioritas,
                     createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
-                    isSelesai: program.pengadaan.length > 0 ? semuaTahapanSelesai : false,
+                    isSelesai: semuaTahapanSelesai,
                     isTerlambat: isProgramTerlambat,
                     tahapanSaatIni: currentTahapanNama,
                     keteranganSaatIni: currentTahapanKeterangan
-                }
+                };
             });
 
             res.status(200).json({
@@ -346,17 +262,13 @@ export const gubernurController = {
             const { slug } = req.params;
 
             const detailProgram = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 include: {
-                    dinas: {
-                        select: { namaDinas: true }
-                    },
+                    dinas: { select: { namaDinas: true } },
                     dokumen: true,
                     pengadaan: {
                         include: {
-                            pengadaan: {
-                                select: { namaPengadaan: true }
-                            },
+                            pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
                                 include: {
                                     tahapan: true,
@@ -373,114 +285,77 @@ export const gubernurController = {
                 return res.status(404).json({ msg: "Program tidak ditemukan." });
             }
 
-            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce((sum, p) => sum + Number(p.anggaran), 0);
-
-            const DAY_MS = 24 * 60 * 60 * 1000;
-
-            const getMidnightMs = (dateInput) => {
-                if (!dateInput) return null;
-                const d = new Date(dateInput);
-                d.setHours(0, 0, 0, 0);
-                return d.getTime();
-            };
-
-            const addDaysMs = (ms, days) => {
-                const d = new Date(ms);
-                d.setDate(d.getDate() + days);
-                return d.getTime();
-            };
+            const calculatedTotalAnggaran = detailProgram.pengadaan.reduce(
+                (sum, p) => sum + Number(p.anggaran), 0
+            );
 
             const formattedPengadaanList = detailProgram.pengadaan.map(transaksi => {
-
-                const tahapanList = transaksi.progresTahapan.map(p => ({
-                    idTahapan: p.tahapan.id,
-                    noUrut: p.tahapan.noUrut,
-                    namaTahapan: p.tahapan.namaTahapan,
-                    standarWaktuHari: p.tahapan.standarWaktuHari,
-                    isWaktuEditable: p.tahapan.isWaktuEditable,
-                    bobot: p.tahapan.bobot,
-                    progres: {
-                        idProgres: p.id,
-                        status: p.status,
-                        planningTanggalMulai: p.planningTanggalMulai,
-                        planningTanggalSelesai: p.planningTanggalSelesai,
-                        aktualTanggalMulai: p.aktualTanggalMulai,
-                        aktualTanggalSelesai: p.aktualTanggalSelesai,
-                        keterangan: p.keterangan,
-                        dokumenBukti: p.dokumen || [],
-                        updatedAt: p.updatedAt
-                    }
-                }));
-
                 let prevEndDateMs = null;
 
-                const tahapanWithForecast = tahapanList.map((t) => {
-                    const planStartMs = getMidnightMs(t.progres.planningTanggalMulai);
-                    const planEndMs = getMidnightMs(t.progres.planningTanggalSelesai);
-                    const aktualStartMs = getMidnightMs(t.progres.aktualTanggalMulai);
-                    const aktualEndMs = getMidnightMs(t.progres.aktualTanggalSelesai);
-
-                    if (!planStartMs || !planEndMs) {
-                        return {
-                            ...t,
-                            forecast: { forecastTanggalMulai: null, forecastTanggalSelesai: null }
-                        };
-                    }
-
-                    const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
+                const tahapanWithForecast = transaksi.progresTahapan.map(p => {
+                    const planStartMs = getMidnightMs(p.planningTanggalMulai);
+                    const planEndMs = getMidnightMs(p.planningTanggalSelesai);
+                    const aktualStartMs = getMidnightMs(p.aktualTanggalMulai);
+                    const aktualEndMs = getMidnightMs(p.aktualTanggalSelesai);
 
                     let forecastStartMs = null;
                     let forecastEndMs = null;
 
-                    if (aktualStartMs && aktualEndMs) {
-                        forecastStartMs = aktualStartMs;
-                        forecastEndMs = aktualEndMs;
-                    }
-                    else if (aktualStartMs && !aktualEndMs) {
-                        forecastStartMs = aktualStartMs;
-                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                    }
-                    else {
-                        if (prevEndDateMs !== null) {
-                            forecastStartMs = addDaysMs(prevEndDateMs, 1);
-                        } else {
-                            forecastStartMs = planStartMs;
-                        }
-                        forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
-                    }
+                    if (planStartMs && planEndMs) {
+                        const planDurDays = Math.round((planEndMs - planStartMs) / DAY_MS);
 
-                    prevEndDateMs = forecastEndMs;
+                        if (aktualStartMs && aktualEndMs) {
+                            forecastStartMs = aktualStartMs;
+                            forecastEndMs = aktualEndMs;
+                        } else if (aktualStartMs) {
+                            forecastStartMs = aktualStartMs;
+                            forecastEndMs = addDaysMs(aktualStartMs, planDurDays);
+                        } else {
+                            forecastStartMs = prevEndDateMs !== null
+                                ? addDaysMs(prevEndDateMs, 1)
+                                : planStartMs;
+                            forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
+                        }
+
+                        prevEndDateMs = forecastEndMs;
+                    }
 
                     return {
-                        ...t,
+                        idTahapan: p.tahapan.id,
+                        noUrut: p.tahapan.noUrut,
+                        namaTahapan: p.tahapan.namaTahapan,
+                        standarWaktuHari: p.tahapan.standarWaktuHari,
+                        isWaktuEditable: p.tahapan.isWaktuEditable,
+                        bobot: p.tahapan.bobot,
+                        progres: {
+                            idProgres: p.id,
+                            status: p.status,
+                            planningTanggalMulai: p.planningTanggalMulai,
+                            planningTanggalSelesai: p.planningTanggalSelesai,
+                            aktualTanggalMulai: p.aktualTanggalMulai,
+                            aktualTanggalSelesai: p.aktualTanggalSelesai,
+                            keterangan: p.keterangan,
+                            dokumenBukti: p.dokumen ?? [],
+                            updatedAt: p.updatedAt
+                        },
                         forecast: {
-                            forecastTanggalMulai: new Date(forecastStartMs).toISOString(),
-                            forecastTanggalSelesai: new Date(forecastEndMs).toISOString()
+                            forecastTanggalMulai: forecastStartMs
+                                ? new Date(forecastStartMs).toISOString()
+                                : null,
+                            forecastTanggalSelesai: forecastEndMs
+                                ? new Date(forecastEndMs).toISOString()
+                                : null
                         }
                     };
                 });
 
-                let programPlanEndMs = null;
-                let programForecastEndMs = null;
+                // Ambil plan end & forecast end dari tahapan terakhir
+                const planEndMs = tahapanWithForecast.reduce((max, t) => {
+                    const ms = getMidnightMs(t.progres.planningTanggalSelesai);
+                    return ms && ms > max ? ms : max;
+                }, null);
 
-                if (tahapanWithForecast.length > 0) {
-                    const lastTahapan = tahapanWithForecast[tahapanWithForecast.length - 1];
-                    programForecastEndMs = lastTahapan.forecast.forecastTanggalSelesai;
-
-                    tahapanWithForecast.forEach(t => {
-                        if (t.progres.planningTanggalSelesai) {
-                            const ms = getMidnightMs(t.progres.planningTanggalSelesai);
-                            if (programPlanEndMs === null || ms > programPlanEndMs) {
-                                programPlanEndMs = ms;
-                            }
-                        }
-                    });
-                }
-
-                const forecastPengadaan = {
-                    planTanggalSelesaiKeseluruhan: programPlanEndMs ? new Date(programPlanEndMs).toISOString() : null,
-                    forecastTanggalSelesaiKeseluruhan: programForecastEndMs || null
-                };
+                const lastForecast = tahapanWithForecast.at(-1)?.forecast.forecastTanggalSelesai;
 
                 return {
                     id: transaksi.id,
@@ -489,27 +364,30 @@ export const gubernurController = {
                     title: transaksi.title,
                     anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
-                    forecastKeseluruhan: forecastPengadaan,
+                    forecastKeseluruhan: {
+                        planTanggalSelesaiKeseluruhan: planEndMs
+                            ? new Date(planEndMs).toISOString()
+                            : null,
+                        forecastTanggalSelesaiKeseluruhan: lastForecast ?? null
+                    },
                     tahapanList: tahapanWithForecast
                 };
             });
 
-            const formattedDetail = {
-                id: detailProgram.id,
-                namaProgram: detailProgram.namaProgram,
-                slug: detailProgram.slug,
-                tanggalMulai: detailProgram.tanggalMulai,
-                anggaran: calculatedTotalAnggaran,
-                isPrioritas: detailProgram.isPrioritas,
-                createdAt: detailProgram.createdAt,
-                dinas: detailProgram.dinas,
-                dokumenProgram: detailProgram.dokumen,
-                pengadaanList: formattedPengadaanList
-            };
-
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program (Gubernur Mode)",
-                data: formattedDetail
+                data: {
+                    id: detailProgram.id,
+                    namaProgram: detailProgram.namaProgram,
+                    slug: detailProgram.slug,
+                    tanggalMulai: detailProgram.tanggalMulai,
+                    anggaran: calculatedTotalAnggaran,
+                    isPrioritas: detailProgram.isPrioritas,
+                    createdAt: detailProgram.createdAt,
+                    dinas: detailProgram.dinas,
+                    dokumenProgram: detailProgram.dokumen,
+                    pengadaanList: formattedPengadaanList
+                }
             });
 
         } catch (error) {
@@ -523,7 +401,7 @@ export const gubernurController = {
             const { slug } = req.params;
 
             const program = await prisma.program.findUnique({
-                where: { slug: slug },
+                where: { slug },
                 select: { id: true }
             });
 
