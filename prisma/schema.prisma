@@ -107,8 +107,8 @@ model DokumenProgram {
   programId   Int      @map("program_id")
   program     Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
   
-  namaFile    String   @map("nama_file")
-  fileUrl     String   @map("file_url")
+  namaFile  String   @map("nama_file") @db.Text
+  fileUrl   String   @map("file_url")  @db.Text
   
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -205,8 +205,8 @@ model DokumenProgresTahapan {
   progresTahapanId Int            @map("progres_tahapan_id")
   progresTahapan   ProgresTahapan @relation(fields: [progresTahapanId], references: [id], onDelete: Cascade)
   
-  namaFile         String         @map("nama_file")
-  fileUrl          String         @map("file_url")
+  namaFile  String   @map("nama_file") @db.Text
+  fileUrl   String   @map("file_url")  @db.Text
   
   createdAt        DateTime       @default(now()) @map("created_at")
 

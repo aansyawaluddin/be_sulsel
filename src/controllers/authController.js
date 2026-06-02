@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../utils/prisma.js';
 
 export const authController = {
@@ -18,20 +19,24 @@ export const authController = {
             if (!isMatch) return res.status(400).json({ msg: "Password salah" });
 
             const accessToken = jwt.sign(
-                {
-                    id: user.id,
-                    role: user.role,
-                    dinasId: user.dinasId
-                },
+                { id: user.id, role: user.role, dinasId: user.dinasId },
                 process.env.JWT_SECRET,
                 { expiresIn: '1d' }
             );
 
             const refreshToken = jwt.sign(
-                { id: user.id, role: user.role },
+                {
+                    id: user.id,
+                    role: user.role,
+                    jti: crypto.randomUUID()
+                },
                 process.env.JWT_REFRESH_SECRET,
                 { expiresIn: '1d' }
             );
+
+            await prisma.accessToken.deleteMany({
+                where: { userId: user.id }
+            });
 
             await prisma.accessToken.create({
                 data: {
