@@ -1086,5 +1086,122 @@ export const masterStaffController = {
             console.error(`🔥 [MASTER - TOLAK PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
         }
-    }
+    },
+
+    tambahPengadaanProgram: async (req, res) => {
+        try {
+            const { slug } = req.params;
+            const { pengadaanList } = req.body;
+
+            if (!pengadaanList || pengadaanList.length === 0) {
+                return res.status(400).json({ msg: "Daftar pengadaan baru wajib diisi." });
+            }
+
+            const programEksis = await prisma.program.findUnique({
+                where: { slug },
+                include: { dinas: true }
+            });
+
+            if (!programEksis) {
+                return res.status(404).json({ msg: "Program tidak ditemukan." });
+            }
+
+            if (programEksis.status !== 'terima') {
+                return res.status(400).json({
+                    msg: "Fitur ini hanya untuk program yang sudah di-ACC (status: terima)."
+                });
+            }
+
+            const result = await prisma.$transaction(async (tx) => {
+                const pengadaanDibuat = [];
+
+                for (const item of pengadaanList) {
+                    if (!item.pengadaanId || !item.anggaran) {
+                        throw new Error(`pengadaanId dan anggaran wajib diisi.`);
+                    }
+
+                    const masterPengadaan = await tx.pengadaan.findUnique({
+                        where: { id: parseInt(item.pengadaanId) }
+                    });
+
+                    if (!masterPengadaan) {
+                        throw new Error(`Pengadaan ID ${item.pengadaanId} tidak ditemukan.`);
+                    }
+
+                    const transaksi = await tx.transaksiPengadaan.create({
+                        data: {
+                            namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programEksis.namaProgram}`,
+                            title: item.title || "Tanpa Judul Spesifik",
+                            anggaran: BigInt(item.anggaran),
+                            programId: programEksis.id,
+                            pengadaanId: masterPengadaan.id
+                        }
+                    });
+
+                    const masterTahapanList = await tx.tahapan.findMany({
+                        where: { pengadaanId: masterPengadaan.id },
+                        orderBy: { noUrut: 'asc' }
+                    });
+
+                    let estimasiTanggalMulai = item.tanggalMulai
+                        ? new Date(item.tanggalMulai)
+                        : new Date();
+
+                    if (!item.tanggalMulai) {
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                    }
+                    estimasiTanggalMulai.setHours(0, 0, 0, 0);
+
+                    const dataProgres = [];
+                    for (const tahapan of masterTahapanList) {
+                        let tanggalMulaiSekarang = new Date(estimasiTanggalMulai);
+                        let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
+
+                        let durasiHari = tahapan.standarWaktuHari;
+                        if (tahapan.isWaktuEditable && durasiHari === null) durasiHari = 14;
+                        else if (durasiHari === null) durasiHari = 1;
+
+                        tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
+
+                        dataProgres.push({
+                            transaksiId: transaksi.id,
+                            tahapanId: tahapan.id,
+                            status: 'on_progress',
+                            planningTanggalMulai: tanggalMulaiSekarang,
+                            planningTanggalSelesai: tanggalSelesaiSekarang
+                        });
+
+                        estimasiTanggalMulai = new Date(tanggalSelesaiSekarang);
+                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                    }
+
+                    if (dataProgres.length > 0) {
+                        await tx.progresTahapan.createMany({ data: dataProgres });
+                    }
+
+                    pengadaanDibuat.push({
+                        id: transaksi.id,
+                        namaTransaksi: transaksi.namaTransaksi,
+                        jenisPengadaan: masterPengadaan.namaPengadaan,
+                        title: transaksi.title,
+                        anggaran: transaksi.anggaran
+                    });
+                }
+
+                return pengadaanDibuat;
+            });
+
+            deleteCacheByPrefix('getProgram:');
+            deleteCacheByPrefix('getDinas:');
+
+            res.status(201).json({
+                msg: `Berhasil menambahkan ${result.length} pengadaan baru ke program '${programEksis.namaProgram}'.`,
+                data: result
+            });
+
+        } catch (error) {
+            console.error(`🔥 [MASTER - TAMBAH PENGADAAN PROGRAM ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
 };

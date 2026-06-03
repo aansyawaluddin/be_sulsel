@@ -75,4 +75,6 @@ router.post(
     masterStaffController.uploadDokumenProgram
 );
 
+router.post('/program/:slug/tambah-pengadaan', masterStaffController.tambahPengadaanProgram);
+
 export default router;
