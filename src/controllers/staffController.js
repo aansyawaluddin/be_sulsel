@@ -1,12 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import prisma from '../utils/prisma.js';
-import {
-    DAY_MS,
-    getMidnightMs,
-    addDaysMs,
-    hitungForecastPengadaan
-} from '../utils/dateHelper.js';
+import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
+import { getCache, setCache, deleteCacheByPrefix } from '../utils/cache.js';
 
 export const staffController = {
 
@@ -14,12 +10,14 @@ export const staffController = {
         try {
             const { role, dinasId, username } = req.user;
 
+            const cacheKey = `getDinas:${role}:${dinasId ?? 'all'}`;
+            const cached = getCache(cacheKey);
+            if (cached) return res.status(200).json({ ...cached, user: { username, role } });
+
             const dinasList = await prisma.dinas.findMany({
                 where: role === 'staff' ? { id: dinasId } : {},
                 select: {
-                    id: true,
-                    namaDinas: true,
-                    slug: true,
+                    id: true, namaDinas: true, slug: true,
                     _count: { select: { programs: true } }
                 },
                 orderBy: { namaDinas: 'asc' }
@@ -28,34 +26,23 @@ export const staffController = {
             const allProgresData = await prisma.progresTahapan.findMany({
                 where: {
                     transaksi: {
-                        program: {
-                            dinasId: { in: dinasList.map(d => d.id) }
-                        }
+                        program: { dinasId: { in: dinasList.map(d => d.id) } }
                     }
                 },
                 select: {
                     status: true,
-                    aktualTanggalMulai: true,
-                    aktualTanggalSelesai: true,
-                    planningTanggalMulai: true,
-                    planningTanggalSelesai: true,
+                    aktualTanggalMulai: true, aktualTanggalSelesai: true,
+                    planningTanggalMulai: true, planningTanggalSelesai: true,
                     transaksi: {
                         select: {
-                            id: true,
-                            programId: true,
-                            program: {
-                                select: {
-                                    id: true,
-                                    dinasId: true
-                                }
-                            }
+                            id: true, programId: true,
+                            program: { select: { id: true, dinasId: true } }
                         }
                     }
                 }
             });
 
             const todayMs = getMidnightMs(new Date());
-
             const dinasStats = Object.fromEntries(
                 dinasList.map(d => [d.id, { dikerjakan: 0, terlambat: 0 }])
             );
@@ -88,19 +75,11 @@ export const staffController = {
 
                     if (tahapanList.some(t =>
                         t.aktualTanggalMulai !== null || t.aktualTanggalSelesai !== null
-                    )) {
-                        sudahDikerjakan = true;
-                    }
+                    )) sudahDikerjakan = true;
 
                     if (!semuaSelesai) semuaProgramSelesai = false;
-
-                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
-                        isProgramTerlambat = true;
-                    }
-
-                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
-                        isProgramTerlambat = true;
-                    }
+                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) isProgramTerlambat = true;
+                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) isProgramTerlambat = true;
                 }
 
                 if (semuaProgramSelesai) isProgramTerlambat = false;
@@ -109,19 +88,20 @@ export const staffController = {
             }
 
             const formattedDinas = dinasList.map(dinas => ({
-                id: dinas.id,
-                namaDinas: dinas.namaDinas,
-                slug: dinas.slug,
+                id: dinas.id, namaDinas: dinas.namaDinas, slug: dinas.slug,
                 totalProgram: dinas._count.programs,
                 programPrioritas: dinasStats[dinas.id]?.dikerjakan ?? 0,
                 programTerlambat: dinasStats[dinas.id]?.terlambat ?? 0
             }));
 
-            res.status(200).json({
+            const responseData = {
                 msg: "Berhasil mengambil data instansi/dinas",
                 user: { username, role },
                 data: formattedDinas
-            });
+            };
+
+            setCache(cacheKey, responseData, 30);
+            res.status(200).json(responseData);
 
         } catch (error) {
             console.error(`🔥 [GET DINAS ERROR]:`, error);
@@ -131,15 +111,18 @@ export const staffController = {
 
     getPengadaan: async (req, res) => {
         try {
+            const cacheKey = 'pengadaan';
+            const cached = getCache(cacheKey);
+            if (cached) return res.status(200).json(cached);
+
             const pengadaanList = await prisma.pengadaan.findMany({
                 select: { id: true, namaPengadaan: true },
                 orderBy: { id: 'asc' }
             });
 
-            res.status(200).json({
-                msg: "Berhasil mengambil data master pengadaan",
-                data: pengadaanList
-            });
+            const response = { msg: "Berhasil mengambil data master pengadaan", data: pengadaanList };
+            setCache(cacheKey, response, 300);
+            res.status(200).json(response);
         } catch (error) {
             console.error(`🔥 [GET PENGADAAN ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -151,27 +134,18 @@ export const staffController = {
             const { namaProgram, pengadaanList, tanggalMulai } = req.body;
             const dinasId = req.user.dinasId;
 
-            if (!dinasId) {
-                return res.status(403).json({ msg: "Akun Staff Anda belum terikat dengan Dinas manapun" });
-            }
+            if (!dinasId) return res.status(403).json({ msg: "Akun Staff Anda belum terikat dengan Dinas manapun" });
             if (!namaProgram || !pengadaanList || pengadaanList.length === 0) {
                 return res.status(400).json({ msg: "Semua field wajib diisi beserta detail pengadaannya" });
             }
 
             const result = await prisma.$transaction(async (tx) => {
-                const baseSlug = namaProgram
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, '-')
-                    .replace(/-+/g, '-')
-                    .replace(/^-|-$/g, '');
-                const slugUnik = `${baseSlug}`;
+                const baseSlug = namaProgram.toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 
                 const programBaru = await tx.program.create({
                     data: {
-                        namaProgram,
-                        slug: slugUnik,
-                        dinasId,
-                        isPrioritas: true,
+                        namaProgram, slug: baseSlug, dinasId, isPrioritas: true,
                         tanggalMulai: tanggalMulai ? new Date(tanggalMulai) : null
                     }
                 });
@@ -182,7 +156,6 @@ export const staffController = {
                     const masterPengadaan = await tx.pengadaan.findUnique({
                         where: { id: parseInt(item.pengadaanId) }
                     });
-
                     if (!masterPengadaan) throw new Error(`Pengadaan ID ${item.pengadaanId} tidak ditemukan`);
 
                     const transaksi = await tx.transaksiPengadaan.create({
@@ -190,25 +163,17 @@ export const staffController = {
                             namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programBaru.namaProgram}`,
                             title: item.title || "Tanpa Judul Spesifik",
                             anggaran: BigInt(item.anggaran),
-                            programId: programBaru.id,
-                            pengadaanId: masterPengadaan.id
+                            programId: programBaru.id, pengadaanId: masterPengadaan.id
                         }
                     });
 
                     const masterTahapanList = await tx.tahapan.findMany({
-                        where: { pengadaanId: masterPengadaan.id },
-                        orderBy: { noUrut: 'asc' }
+                        where: { pengadaanId: masterPengadaan.id }, orderBy: { noUrut: 'asc' }
                     });
 
-                    let estimasiTanggalMulai;
-                    if (tanggalMulai) {
-                        estimasiTanggalMulai = new Date(tanggalMulai);
-                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
-                    } else {
-                        estimasiTanggalMulai = new Date();
-                        estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
-                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
-                    }
+                    let estimasiTanggalMulai = tanggalMulai ? new Date(tanggalMulai) : new Date();
+                    if (!tanggalMulai) estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                    estimasiTanggalMulai.setHours(0, 0, 0, 0);
 
                     const dataProgres = [];
                     for (const tahapan of masterTahapanList) {
@@ -216,18 +181,12 @@ export const staffController = {
                         let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
 
                         let durasiHari = tahapan.standarWaktuHari;
-                        if (tahapan.isWaktuEditable && durasiHari === null) {
-                            durasiHari = 14;
-                        } else if (durasiHari === null) {
-                            durasiHari = 1;
-                        }
+                        if (tahapan.isWaktuEditable && durasiHari === null) durasiHari = 14;
+                        else if (durasiHari === null) durasiHari = 1;
 
                         tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
-
                         dataProgres.push({
-                            transaksiId: transaksi.id,
-                            tahapanId: tahapan.id,
-                            status: 'on_progress',
+                            transaksiId: transaksi.id, tahapanId: tahapan.id, status: 'on_progress',
                             planningTanggalMulai: tanggalMulaiSekarang,
                             planningTanggalSelesai: tanggalSelesaiSekarang
                         });
@@ -236,24 +195,19 @@ export const staffController = {
                         estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
                     }
 
-                    if (dataProgres.length > 0) {
-                        await tx.progresTahapan.createMany({ data: dataProgres });
-                    }
+                    if (dataProgres.length > 0) await tx.progresTahapan.createMany({ data: dataProgres });
                 }
 
                 return {
-                    id: programBaru.id,
-                    namaProgram: programBaru.namaProgram,
-                    slug: programBaru.slug,
-                    tanggalMulai: programBaru.tanggalMulai
+                    id: programBaru.id, namaProgram: programBaru.namaProgram,
+                    slug: programBaru.slug, tanggalMulai: programBaru.tanggalMulai
                 };
             });
 
-            res.status(201).json({
-                msg: "Program dan seluruh jadwal pengadaan berhasil dibuat!",
-                data: result
-            });
+            deleteCacheByPrefix('getDinas:');
+            deleteCacheByPrefix('getProgram:');
 
+            res.status(201).json({ msg: "Program dan seluruh jadwal pengadaan berhasil dibuat!", data: result });
         } catch (error) {
             console.error(`🔥 [CREATE PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -266,14 +220,15 @@ export const staffController = {
             const dinasId = req.user.dinasId;
             const role = req.user.role;
 
+            const cacheKey = `getProgram:staff:${slug}:${dinasId}`;
+            const cached = getCache(cacheKey);
+            if (cached) return res.status(200).json(cached);
+
             const filter = {};
 
             if (slug) {
                 const targetDinas = await prisma.dinas.findUnique({ where: { slug } });
-
-                if (!targetDinas) {
-                    return res.status(404).json({ msg: "Instansi/Dinas tidak ditemukan." });
-                }
+                if (!targetDinas) return res.status(404).json({ msg: "Instansi/Dinas tidak ditemukan." });
 
                 if (role === 'staff' && targetDinas.id !== dinasId) {
                     return res.status(403).json({
@@ -284,37 +239,24 @@ export const staffController = {
                 filter.dinas = { slug };
             }
 
-            if (role === 'staff') {
-                filter.dinasId = dinasId;
-            }
+            if (role === 'staff') filter.dinasId = dinasId;
 
             const programList = await prisma.program.findMany({
                 where: filter,
                 select: {
-                    id: true,
-                    namaProgram: true,
-                    slug: true,
-                    isPrioritas: true,
-                    status: true,
-                    tanggalMulai: true,
-                    createdAt: true,
+                    id: true, namaProgram: true, slug: true,
+                    isPrioritas: true, status: true, tanggalMulai: true, createdAt: true,
                     pengadaan: {
                         select: {
-                            id: true,
-                            title: true,
-                            anggaran: true,
+                            id: true, title: true, anggaran: true,
                             pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
                                 select: {
                                     status: true,
-                                    planningTanggalMulai: true,
-                                    planningTanggalSelesai: true,
-                                    aktualTanggalMulai: true,
-                                    aktualTanggalSelesai: true,
+                                    planningTanggalMulai: true, planningTanggalSelesai: true,
+                                    aktualTanggalMulai: true, aktualTanggalSelesai: true,
                                     keterangan: true,
-                                    tahapan: {
-                                        select: { noUrut: true, namaTahapan: true }
-                                    }
+                                    tahapan: { select: { noUrut: true, namaTahapan: true } }
                                 },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
@@ -340,12 +282,9 @@ export const staffController = {
                     semuaTahapanSelesai = false;
                 } else {
                     let foundActiveTahapan = false;
-
                     for (const pengadaan of program.pengadaan) {
                         if (!foundActiveTahapan) {
-                            const activeTahapan = pengadaan.progresTahapan.find(
-                                t => t.status === 'on_progress'
-                            );
+                            const activeTahapan = pengadaan.progresTahapan.find(t => t.status === 'on_progress');
                             if (activeTahapan) {
                                 currentTahapanNama = activeTahapan.tahapan.namaTahapan;
                                 const ket = activeTahapan.keterangan;
@@ -360,14 +299,8 @@ export const staffController = {
                             hitungForecastPengadaan(pengadaan.progresTahapan);
 
                         if (!semuaSelesai) semuaTahapanSelesai = false;
-
-                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
-                            isProgramTerlambat = true;
-                        }
-
-                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
-                            isProgramTerlambat = true;
-                        }
+                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) isProgramTerlambat = true;
+                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) isProgramTerlambat = true;
                     }
 
                     if (semuaTahapanSelesai) {
@@ -376,34 +309,22 @@ export const staffController = {
                     }
                 }
 
-                const detailPengadaanList = program.pengadaan.map(p => ({
-                    id: p.id,
-                    metode: p.pengadaan.namaPengadaan,
-                    title: p.title,
-                    anggaran: Number(p.anggaran)
-                }));
-
                 return {
-                    id: program.id,
-                    namaProgram: program.namaProgram,
-                    slug: program.slug,
-                    tanggalMulai: program.tanggalMulai,
-                    anggaran: calculatedAnggaran,
-                    isPrioritas: program.isPrioritas,
-                    status: program.status,
-                    createdAt: program.createdAt,
-                    pengadaanList: detailPengadaanList,
-                    isSelesai: semuaTahapanSelesai,
-                    isTerlambat: isProgramTerlambat,
-                    tahapanSaatIni: currentTahapanNama,
-                    keteranganSaatIni: currentTahapanKeterangan
+                    id: program.id, namaProgram: program.namaProgram, slug: program.slug,
+                    tanggalMulai: program.tanggalMulai, anggaran: calculatedAnggaran,
+                    isPrioritas: program.isPrioritas, status: program.status, createdAt: program.createdAt,
+                    pengadaanList: program.pengadaan.map(p => ({
+                        id: p.id, metode: p.pengadaan.namaPengadaan,
+                        title: p.title, anggaran: Number(p.anggaran)
+                    })),
+                    isSelesai: semuaTahapanSelesai, isTerlambat: isProgramTerlambat,
+                    tahapanSaatIni: currentTahapanNama, keteranganSaatIni: currentTahapanKeterangan
                 };
             });
 
-            res.status(200).json({
-                msg: "Berhasil mengambil daftar program",
-                data: formattedPrograms
-            });
+            const responseData = { msg: "Berhasil mengambil daftar program", data: formattedPrograms };
+            setCache(cacheKey, responseData, 30);
+            res.status(200).json(responseData);
 
         } catch (error) {
             console.error(`🔥 [GET PROGRAM ERROR]:`, error);
@@ -417,19 +338,14 @@ export const staffController = {
             const { namaProgram, tanggalMulai, pengadaanList } = req.body;
             const dinasId = req.user.dinasId;
 
-            const programEksis = await prisma.program.findUnique({
-                where: { id: parseInt(id) }
-            });
-
+            const programEksis = await prisma.program.findUnique({ where: { id: parseInt(id) } });
             if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
-
             if (programEksis.dinasId !== dinasId) {
                 return res.status(403).json({ msg: "Akses Terlarang: Anda tidak dapat mengubah program milik instansi lain." });
             }
-
             if (programEksis.status !== 'menunggu') {
                 return res.status(403).json({
-                    msg: "Akses Ditolak: Program yang sudah divalidasi (Diterima/Ditolak) tidak dapat diubah rinciannya lagi."
+                    msg: "Akses Ditolak: Program yang sudah divalidasi tidak dapat diubah rinciannya lagi."
                 });
             }
 
@@ -439,7 +355,7 @@ export const staffController = {
                 if (namaProgram) {
                     dataUpdate.namaProgram = namaProgram;
                     const baseSlug = namaProgram.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-                    dataUpdate.slug = `${baseSlug}`;
+                    dataUpdate.slug = baseSlug;
                 }
 
                 if (tanggalMulai !== undefined) {
@@ -447,14 +363,11 @@ export const staffController = {
                 }
 
                 const programDiupdate = await tx.program.update({
-                    where: { id: parseInt(id) },
-                    data: dataUpdate
+                    where: { id: parseInt(id) }, data: dataUpdate
                 });
 
                 if (pengadaanList && Array.isArray(pengadaanList)) {
-                    await tx.transaksiPengadaan.deleteMany({
-                        where: { programId: parseInt(id) }
-                    });
+                    await tx.transaksiPengadaan.deleteMany({ where: { programId: parseInt(id) } });
 
                     for (const item of pengadaanList) {
                         if (!item.anggaran) throw new Error(`Anggaran wajib diisi untuk pengadaan: ${item.title}`);
@@ -462,7 +375,6 @@ export const staffController = {
                         const masterPengadaan = await tx.pengadaan.findUnique({
                             where: { id: parseInt(item.pengadaanId) }
                         });
-
                         if (!masterPengadaan) throw new Error(`Pengadaan ID ${item.pengadaanId} tidak ditemukan`);
 
                         const transaksi = await tx.transaksiPengadaan.create({
@@ -470,27 +382,18 @@ export const staffController = {
                                 namaTransaksi: `${masterPengadaan.namaPengadaan} - ${programDiupdate.namaProgram}`,
                                 title: item.title || "Tanpa Judul Spesifik",
                                 anggaran: BigInt(item.anggaran),
-                                programId: programDiupdate.id,
-                                pengadaanId: masterPengadaan.id
+                                programId: programDiupdate.id, pengadaanId: masterPengadaan.id
                             }
                         });
 
                         const masterTahapanList = await tx.tahapan.findMany({
-                            where: { pengadaanId: masterPengadaan.id },
-                            orderBy: { noUrut: 'asc' }
+                            where: { pengadaanId: masterPengadaan.id }, orderBy: { noUrut: 'asc' }
                         });
 
                         const tglMulaiAcuan = tanggalMulai !== undefined ? tanggalMulai : programEksis.tanggalMulai;
-
-                        let estimasiTanggalMulai;
-                        if (tglMulaiAcuan) {
-                            estimasiTanggalMulai = new Date(tglMulaiAcuan);
-                            estimasiTanggalMulai.setHours(0, 0, 0, 0);
-                        } else {
-                            estimasiTanggalMulai = new Date();
-                            estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
-                            estimasiTanggalMulai.setHours(0, 0, 0, 0);
-                        }
+                        let estimasiTanggalMulai = tglMulaiAcuan ? new Date(tglMulaiAcuan) : new Date();
+                        if (!tglMulaiAcuan) estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
+                        estimasiTanggalMulai.setHours(0, 0, 0, 0);
 
                         const dataProgres = [];
                         for (const tahapan of masterTahapanList) {
@@ -498,18 +401,12 @@ export const staffController = {
                             let tanggalSelesaiSekarang = new Date(tanggalMulaiSekarang);
 
                             let durasiHari = tahapan.standarWaktuHari;
-                            if (tahapan.isWaktuEditable && durasiHari === null) {
-                                durasiHari = 14;
-                            } else if (durasiHari === null) {
-                                durasiHari = 1;
-                            }
+                            if (tahapan.isWaktuEditable && durasiHari === null) durasiHari = 14;
+                            else if (durasiHari === null) durasiHari = 1;
 
                             tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
-
                             dataProgres.push({
-                                transaksiId: transaksi.id,
-                                tahapanId: tahapan.id,
-                                status: 'on_progress',
+                                transaksiId: transaksi.id, tahapanId: tahapan.id, status: 'on_progress',
                                 planningTanggalMulai: tanggalMulaiSekarang,
                                 planningTanggalSelesai: tanggalSelesaiSekarang
                             });
@@ -518,20 +415,17 @@ export const staffController = {
                             estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
                         }
 
-                        if (dataProgres.length > 0) {
-                            await tx.progresTahapan.createMany({ data: dataProgres });
-                        }
+                        if (dataProgres.length > 0) await tx.progresTahapan.createMany({ data: dataProgres });
                     }
                 }
 
                 return programDiupdate;
             });
 
-            res.status(200).json({
-                msg: "Berhasil memperbarui data program secara keseluruhan.",
-                data: result
-            });
+            deleteCacheByPrefix('getDinas:');
+            deleteCacheByPrefix('getProgram:');
 
+            res.status(200).json({ msg: "Berhasil memperbarui data program secara keseluruhan.", data: result });
         } catch (error) {
             console.error(`🔥 [STAFF - UPDATE PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -543,33 +437,24 @@ export const staffController = {
             const { id } = req.params;
             const dinasId = req.user.dinasId;
 
-            const programEksis = await prisma.program.findUnique({
-                where: { id: parseInt(id) }
-            });
-
+            const programEksis = await prisma.program.findUnique({ where: { id: parseInt(id) } });
             if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
-
             if (programEksis.dinasId !== dinasId) {
                 return res.status(403).json({ msg: "Akses Terlarang: Anda tidak dapat menghapus program milik instansi lain." });
             }
-
             if (programEksis.status === 'terima') {
-                return res.status(403).json({
-                    msg: "Akses Ditolak: Program yang sudah disetujui tidak dapat dihapus."
-                });
+                return res.status(403).json({ msg: "Akses Ditolak: Program yang sudah disetujui tidak dapat dihapus." });
             }
 
             await prisma.program.delete({ where: { id: parseInt(id) } });
 
             const targetDir = path.join('public', 'uploads', programEksis.slug);
-            if (fs.existsSync(targetDir)) {
-                fs.rmSync(targetDir, { recursive: true, force: true });
-            }
+            if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
 
-            res.status(200).json({
-                msg: `Program '${programEksis.namaProgram}' berhasil dihapus.`
-            });
+            deleteCacheByPrefix('getDinas:');
+            deleteCacheByPrefix('getProgram:');
 
+            res.status(200).json({ msg: `Program '${programEksis.namaProgram}' berhasil dihapus.` });
         } catch (error) {
             console.error(`🔥 [STAFF - DELETE PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -594,10 +479,7 @@ export const staffController = {
                         include: {
                             pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
-                                include: {
-                                    tahapan: true,
-                                    dokumen: true
-                                },
+                                include: { tahapan: true, dokumen: true },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
                         }
@@ -644,8 +526,7 @@ export const staffController = {
                             forecastEndMs = addDaysMs(aktualStartMs, planDurDays);
                         } else {
                             forecastStartMs = prevEndDateMs !== null
-                                ? addDaysMs(prevEndDateMs, 1)
-                                : planStartMs;
+                                ? addDaysMs(prevEndDateMs, 1) : planStartMs;
                             forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                         }
 
@@ -653,15 +534,13 @@ export const staffController = {
                     }
 
                     return {
-                        idTahapan: p.tahapan.id,
-                        noUrut: p.tahapan.noUrut,
+                        idTahapan: p.tahapan.id, noUrut: p.tahapan.noUrut,
                         namaTahapan: p.tahapan.namaTahapan,
                         standarWaktuHari: p.tahapan.standarWaktuHari,
                         isWaktuEditable: p.tahapan.isWaktuEditable,
                         bobot: p.tahapan.bobot,
                         progres: {
-                            idProgres: p.id,
-                            status: p.status,
+                            idProgres: p.id, status: p.status,
                             planningTanggalMulai: p.planningTanggalMulai,
                             planningTanggalSelesai: p.planningTanggalSelesai,
                             aktualTanggalMulai: p.aktualTanggalMulai,
@@ -672,11 +551,9 @@ export const staffController = {
                         },
                         forecast: {
                             forecastTanggalMulai: forecastStartMs
-                                ? new Date(forecastStartMs).toISOString()
-                                : null,
+                                ? new Date(forecastStartMs).toISOString() : null,
                             forecastTanggalSelesai: forecastEndMs
-                                ? new Date(forecastEndMs).toISOString()
-                                : null
+                                ? new Date(forecastEndMs).toISOString() : null
                         }
                     };
                 });
@@ -689,17 +566,12 @@ export const staffController = {
                 const lastForecast = tahapanWithForecast.at(-1)?.forecast.forecastTanggalSelesai;
 
                 return {
-                    id: transaksi.id,
-                    pengadaanId: transaksi.pengadaanId,
+                    id: transaksi.id, pengadaanId: transaksi.pengadaanId,
                     namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
-                    title: transaksi.title,
-                    anggaran: transaksi.anggaran,
-                    createdAt: transaksi.createdAt,
+                    title: transaksi.title, anggaran: transaksi.anggaran, createdAt: transaksi.createdAt,
                     forecastKeseluruhan: {
-                        planTanggalSelesaiKeseluruhan: planEndMs
-                            ? new Date(planEndMs).toISOString()
-                            : null,
+                        planTanggalSelesaiKeseluruhan: planEndMs ? new Date(planEndMs).toISOString() : null,
                         forecastTanggalSelesaiKeseluruhan: lastForecast ?? null
                     },
                     tahapanList: tahapanWithForecast
@@ -709,12 +581,9 @@ export const staffController = {
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program beserta hasil forecast",
                 data: {
-                    id: detailProgram.id,
-                    namaProgram: detailProgram.namaProgram,
-                    slug: detailProgram.slug,
-                    tanggalMulai: detailProgram.tanggalMulai,
-                    anggaran: calculatedTotalAnggaran,
-                    status: detailProgram.status,
+                    id: detailProgram.id, namaProgram: detailProgram.namaProgram,
+                    slug: detailProgram.slug, tanggalMulai: detailProgram.tanggalMulai,
+                    anggaran: calculatedTotalAnggaran, status: detailProgram.status,
                     isPrioritas: detailProgram.isPrioritas,
                     isPlanningLocked: detailProgram.isPlanningLocked,
                     createdAt: detailProgram.createdAt,
@@ -723,7 +592,6 @@ export const staffController = {
                     pengadaanList: formattedPengadaanList
                 }
             });
-
         } catch (error) {
             console.error(`🔥 [GET DETAIL PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -737,27 +605,20 @@ export const staffController = {
 
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
-                include: {
-                    tahapan: true,
-                    transaksi: { include: { program: true } }
-                }
+                include: { tahapan: true, transaksi: { include: { program: true } } }
             });
 
-            if (!progresEksis) {
-                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
-            }
+            if (!progresEksis) return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
 
             if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
                 return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
-
             if (progresEksis.transaksi.program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
-
             if (progresEksis.transaksi.program.isPlanningLocked === true) {
                 return res.status(403).json({
-                    msg: "Akses Ditolak: Jadwal (Planning) program ini telah DIKUNCI oleh Master Staff dan tidak dapat diubah lagi."
+                    msg: "Akses Ditolak: Jadwal (Planning) program ini telah DIKUNCI oleh Master Staff."
                 });
             }
 
@@ -765,18 +626,16 @@ export const staffController = {
                 const dataUpdate = {};
 
                 if (planningTanggalMulai) {
-                    const dateMulai = new Date(planningTanggalMulai);
-                    if (!isNaN(dateMulai.getTime())) dataUpdate.planningTanggalMulai = dateMulai;
+                    const d = new Date(planningTanggalMulai);
+                    if (!isNaN(d.getTime())) dataUpdate.planningTanggalMulai = d;
                 }
-
                 if (planningTanggalSelesai) {
-                    const dateSelesai = new Date(planningTanggalSelesai);
-                    if (!isNaN(dateSelesai.getTime())) dataUpdate.planningTanggalSelesai = dateSelesai;
+                    const d = new Date(planningTanggalSelesai);
+                    if (!isNaN(d.getTime())) dataUpdate.planningTanggalSelesai = d;
                 }
 
                 const progresDiupdate = await tx.progresTahapan.update({
-                    where: { id: parseInt(progresId) },
-                    data: dataUpdate
+                    where: { id: parseInt(progresId) }, data: dataUpdate
                 });
 
                 if (dataUpdate.planningTanggalSelesai) {
@@ -824,11 +683,12 @@ export const staffController = {
                 return progresDiupdate;
             });
 
+            deleteCacheByPrefix('getProgram:');
+
             res.status(200).json({
                 msg: `Berhasil mengatur ulang jadwal planning. Jadwal tahapan selanjutnya telah disesuaikan otomatis.`,
                 data: result
             });
-
         } catch (error) {
             console.error(`🔥 [UPDATE PLANNING ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -842,24 +702,17 @@ export const staffController = {
 
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
-                include: {
-                    tahapan: true,
-                    transaksi: { include: { program: true } }
-                }
+                include: { tahapan: true, transaksi: { include: { program: true } } }
             });
 
-            if (!progresEksis) {
-                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
-            }
+            if (!progresEksis) return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
 
             if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
                 return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
-
             if (progresEksis.transaksi.program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
-
             if (progresEksis.status === 'selesai') {
                 return res.status(403).json({ msg: "Akses Ditolak: Tahapan ini sudah diselesaikan dan datanya telah dikunci." });
             }
@@ -869,7 +722,6 @@ export const staffController = {
 
                 if (keterangan && keterangan.trim() !== "") {
                     let daftarKeterangan = [];
-
                     if (progresEksis.keterangan) {
                         if (Array.isArray(progresEksis.keterangan)) {
                             daftarKeterangan = progresEksis.keterangan;
@@ -881,43 +733,34 @@ export const staffController = {
                             });
                         }
                     }
-
                     daftarKeterangan.push({
                         catatan: keterangan,
                         tanggal: new Date().toISOString(),
                         penulis: req.user.username
                     });
-
                     dataUpdate.keterangan = daftarKeterangan;
                 }
 
                 if (aktualTanggalMulai) {
-                    const dateMulai = new Date(aktualTanggalMulai);
-                    if (!isNaN(dateMulai.getTime())) dataUpdate.aktualTanggalMulai = dateMulai;
+                    const d = new Date(aktualTanggalMulai);
+                    if (!isNaN(d.getTime())) dataUpdate.aktualTanggalMulai = d;
                 }
-
                 if (aktualTanggalSelesai) {
-                    const dateSelesai = new Date(aktualTanggalSelesai);
-                    if (!isNaN(dateSelesai.getTime())) dataUpdate.aktualTanggalSelesai = dateSelesai;
+                    const d = new Date(aktualTanggalSelesai);
+                    if (!isNaN(d.getTime())) dataUpdate.aktualTanggalSelesai = d;
                 }
 
                 await tx.progresTahapan.update({
-                    where: { id: parseInt(progresId) },
-                    data: dataUpdate
+                    where: { id: parseInt(progresId) }, data: dataUpdate
                 });
 
                 if (req.files && req.files.length > 0) {
                     const programSlug = progresEksis.transaksi.program.slug;
                     const targetDir = path.join('public', 'uploads', programSlug);
-
-                    if (!fs.existsSync(targetDir)) {
-                        fs.mkdirSync(targetDir, { recursive: true });
-                    }
+                    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
                     const dataDokumen = req.files.map(file => {
-                        const oldPath = file.path;
-                        const newPath = path.join(targetDir, file.filename);
-                        fs.renameSync(oldPath, newPath);
+                        fs.renameSync(file.path, path.join(targetDir, file.filename));
                         return {
                             progresTahapanId: parseInt(progresId),
                             namaFile: file.originalname,
@@ -934,11 +777,10 @@ export const staffController = {
                 });
             });
 
-            res.status(200).json({
-                msg: `Berhasil menyimpan data aktual.`,
-                data: result
-            });
+            deleteCacheByPrefix('getDinas:');
+            deleteCacheByPrefix('getProgram:');
 
+            res.status(200).json({ msg: `Berhasil menyimpan data aktual.`, data: result });
         } catch (error) {
             console.error(`🔥 [UPDATE AKTUAL ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -951,23 +793,17 @@ export const staffController = {
 
             const progresEksis = await prisma.progresTahapan.findUnique({
                 where: { id: parseInt(progresId) },
-                include: {
-                    transaksi: { include: { program: true } }
-                }
+                include: { transaksi: { include: { program: true } } }
             });
 
-            if (!progresEksis) {
-                return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
-            }
+            if (!progresEksis) return res.status(404).json({ msg: "Data Progres Tahapan tidak ditemukan" });
 
             if (req.user.role === 'staff' && progresEksis.transaksi.program.dinasId !== req.user.dinasId) {
                 return res.status(403).json({ msg: "Akses Ditolak: Anda tidak memiliki akses ke program instansi lain." });
             }
-
             if (progresEksis.transaksi.program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
-
             if (progresEksis.status === 'selesai') {
                 return res.status(400).json({ msg: "Tahapan ini sudah dikunci sebelumnya." });
             }
@@ -977,11 +813,13 @@ export const staffController = {
                 data: { status: 'selesai' }
             });
 
+            deleteCacheByPrefix('getDinas:');
+            deleteCacheByPrefix('getProgram:');
+
             res.status(200).json({
                 msg: "Tahapan berhasil diselesaikan dan dikunci. Data pada tahapan ini tidak dapat diubah lagi.",
                 data: progresDikunci
             });
-
         } catch (error) {
             console.error(`🔥 [SELESAIKAN TAHAPAN ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -998,28 +836,19 @@ export const staffController = {
             if (role === 'staff') filter.dinasId = dinasId;
 
             const program = await prisma.program.findFirst({ where: filter });
-
-            if (!program) {
-                return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
-            }
-
+            if (!program) return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
             if (role === 'staff' && program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
-
             if (!req.files || req.files.length === 0) {
                 return res.status(400).json({ msg: "Tidak ada dokumen yang diunggah." });
             }
 
             const targetDir = path.join('public', 'uploads', program.slug);
-            if (!fs.existsSync(targetDir)) {
-                fs.mkdirSync(targetDir, { recursive: true });
-            }
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
             const dataDokumen = req.files.map(file => {
-                const oldPath = file.path;
-                const newPath = path.join(targetDir, file.filename);
-                fs.renameSync(oldPath, newPath);
+                fs.renameSync(file.path, path.join(targetDir, file.filename));
                 return {
                     programId: program.id,
                     namaFile: file.originalname,
@@ -1034,11 +863,7 @@ export const staffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
-            res.status(201).json({
-                msg: "Berhasil mengunggah dokumen program",
-                data: dokumenTerbaru
-            });
-
+            res.status(201).json({ msg: "Berhasil mengunggah dokumen program", data: dokumenTerbaru });
         } catch (error) {
             console.error(`🔥 [UPLOAD DOKUMEN PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
@@ -1055,14 +880,10 @@ export const staffController = {
             if (role === 'staff') filter.dinasId = dinasId;
 
             const program = await prisma.program.findFirst({
-                where: filter,
-                select: { id: true, status: true }
+                where: filter, select: { id: true, status: true }
             });
 
-            if (!program) {
-                return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
-            }
-
+            if (!program) return res.status(404).json({ msg: "Program tidak ditemukan atau Anda tidak memiliki akses." });
             if (role === 'staff' && program.status === 'menunggu') {
                 return res.status(403).json({ msg: "Akses Ditolak: Program belum divalidasi oleh Master Staff." });
             }
@@ -1072,11 +893,7 @@ export const staffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
-            res.status(200).json({
-                msg: "Berhasil mengambil daftar dokumen program",
-                data: dokumenList
-            });
-
+            res.status(200).json({ msg: "Berhasil mengambil daftar dokumen program", data: dokumenList });
         } catch (error) {
             console.error(`🔥 [GET DOKUMEN PROGRAM ERROR]:`, error);
             res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });

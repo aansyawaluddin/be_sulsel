@@ -1,10 +1,6 @@
 import prisma from '../utils/prisma.js';
-import {
-    DAY_MS,
-    getMidnightMs,
-    addDaysMs,
-    hitungForecastPengadaan
-} from '../utils/dateHelper.js';
+import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
+import { getCache, setCache } from '../utils/cache.js';
 
 export const gubernurController = {
 
@@ -12,11 +8,13 @@ export const gubernurController = {
         try {
             const { role, username } = req.user;
 
+            const cacheKey = `getDinas:${role}`;
+            const cached = getCache(cacheKey);
+            if (cached) return res.status(200).json({ ...cached, user: { username, role } });
+
             const dinasList = await prisma.dinas.findMany({
                 select: {
-                    id: true,
-                    namaDinas: true,
-                    slug: true,
+                    id: true, namaDinas: true, slug: true,
                     _count: { select: { programs: true } }
                 },
                 orderBy: { namaDinas: 'asc' }
@@ -25,34 +23,23 @@ export const gubernurController = {
             const allProgresData = await prisma.progresTahapan.findMany({
                 where: {
                     transaksi: {
-                        program: {
-                            dinasId: { in: dinasList.map(d => d.id) }
-                        }
+                        program: { dinasId: { in: dinasList.map(d => d.id) } }
                     }
                 },
                 select: {
                     status: true,
-                    aktualTanggalMulai: true,
-                    aktualTanggalSelesai: true,
-                    planningTanggalMulai: true,
-                    planningTanggalSelesai: true,
+                    aktualTanggalMulai: true, aktualTanggalSelesai: true,
+                    planningTanggalMulai: true, planningTanggalSelesai: true,
                     transaksi: {
                         select: {
-                            id: true,
-                            programId: true,
-                            program: {
-                                select: {
-                                    id: true,
-                                    dinasId: true
-                                }
-                            }
+                            id: true, programId: true,
+                            program: { select: { id: true, dinasId: true } }
                         }
                     }
                 }
             });
 
             const todayMs = getMidnightMs(new Date());
-
             const dinasStats = Object.fromEntries(
                 dinasList.map(d => [d.id, { dikerjakan: 0, terlambat: 0 }])
             );
@@ -61,11 +48,7 @@ export const gubernurController = {
             for (const progres of allProgresData) {
                 const { id: tId, programId, program } = progres.transaksi;
                 if (!transaksiMap[tId]) {
-                    transaksiMap[tId] = {
-                        programId,
-                        dinasId: program.dinasId,
-                        tahapanList: []
-                    };
+                    transaksiMap[tId] = { programId, dinasId: program.dinasId, tahapanList: [] };
                 }
                 transaksiMap[tId].tahapanList.push(progres);
             }
@@ -84,50 +67,38 @@ export const gubernurController = {
                 let sudahDikerjakan = false;
 
                 for (const tahapanList of transaksiList) {
-                    const {
-                        forecastEndMs,
-                        planEndMs,
-                        pengadaanSelesai,
-                        semuaSelesai
-                    } = hitungForecastPengadaan(tahapanList);
+                    const { forecastEndMs, planEndMs, pengadaanSelesai, semuaSelesai } =
+                        hitungForecastPengadaan(tahapanList);
 
                     if (tahapanList.some(t =>
                         t.aktualTanggalMulai !== null || t.aktualTanggalSelesai !== null
-                    )) {
-                        sudahDikerjakan = true;
-                    }
+                    )) sudahDikerjakan = true;
 
                     if (!semuaSelesai) semuaProgramSelesai = false;
-
-                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
-                        isProgramTerlambat = true;
-                    }
-
-                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
-                        isProgramTerlambat = true;
-                    }
+                    if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) isProgramTerlambat = true;
+                    if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) isProgramTerlambat = true;
                 }
 
-                // Kalau semua tahapan selesai, tidak mungkin terlambat
                 if (semuaProgramSelesai) isProgramTerlambat = false;
                 if (sudahDikerjakan) dinasStats[dinasId].dikerjakan++;
                 if (isProgramTerlambat) dinasStats[dinasId].terlambat++;
             }
 
             const formattedDinas = dinasList.map(dinas => ({
-                id: dinas.id,
-                namaDinas: dinas.namaDinas,
-                slug: dinas.slug,
+                id: dinas.id, namaDinas: dinas.namaDinas, slug: dinas.slug,
                 totalProgram: dinas._count.programs,
                 programPrioritas: dinasStats[dinas.id]?.dikerjakan ?? 0,
                 programTerlambat: dinasStats[dinas.id]?.terlambat ?? 0
             }));
 
-            res.status(200).json({
+            const responseData = {
                 msg: "Berhasil mengambil data seluruh instansi/dinas",
                 user: { username, role },
                 data: formattedDinas
-            });
+            };
+
+            setCache(cacheKey, responseData, 30);
+            res.status(200).json(responseData);
 
         } catch (error) {
             console.error(`🔥 [GUBERNUR - GET DINAS ERROR]:`, error);
@@ -139,16 +110,15 @@ export const gubernurController = {
         try {
             const { slug } = req.params;
 
-            // Query ringan: ambil program + anggaran + nama tahapan aktif saja
+            const cacheKey = `getProgram:gubernur:${slug}`;
+            const cached = getCache(cacheKey);
+            if (cached) return res.status(200).json(cached);
+
             const programList = await prisma.program.findMany({
                 where: { dinas: { slug } },
                 select: {
-                    id: true,
-                    namaProgram: true,
-                    slug: true,
-                    isPrioritas: true,
-                    status: true,
-                    createdAt: true,
+                    id: true, namaProgram: true, slug: true,
+                    isPrioritas: true, status: true, createdAt: true,
                     pengadaan: {
                         select: {
                             anggaran: true,
@@ -156,14 +126,10 @@ export const gubernurController = {
                             progresTahapan: {
                                 select: {
                                     status: true,
-                                    planningTanggalMulai: true,
-                                    planningTanggalSelesai: true,
-                                    aktualTanggalMulai: true,
-                                    aktualTanggalSelesai: true,
+                                    planningTanggalMulai: true, planningTanggalSelesai: true,
+                                    aktualTanggalMulai: true, aktualTanggalSelesai: true,
                                     keterangan: true,
-                                    tahapan: {
-                                        select: { noUrut: true, namaTahapan: true }
-                                    }
+                                    tahapan: { select: { noUrut: true, namaTahapan: true } }
                                 },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
@@ -189,13 +155,9 @@ export const gubernurController = {
                     semuaTahapanSelesai = false;
                 } else {
                     let foundActiveTahapan = false;
-
                     for (const pengadaan of program.pengadaan) {
-                        // Cari tahapan aktif untuk ditampilkan
                         if (!foundActiveTahapan) {
-                            const activeTahapan = pengadaan.progresTahapan.find(
-                                t => t.status === 'on_progress'
-                            );
+                            const activeTahapan = pengadaan.progresTahapan.find(t => t.status === 'on_progress');
                             if (activeTahapan) {
                                 currentTahapanNama = activeTahapan.tahapan.namaTahapan;
                                 const ket = activeTahapan.keterangan;
@@ -206,22 +168,12 @@ export const gubernurController = {
                             }
                         }
 
-                        const {
-                            forecastEndMs,
-                            planEndMs,
-                            pengadaanSelesai,
-                            semuaSelesai
-                        } = hitungForecastPengadaan(pengadaan.progresTahapan);
+                        const { forecastEndMs, planEndMs, pengadaanSelesai, semuaSelesai } =
+                            hitungForecastPengadaan(pengadaan.progresTahapan);
 
                         if (!semuaSelesai) semuaTahapanSelesai = false;
-
-                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) {
-                            isProgramTerlambat = true;
-                        }
-
-                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) {
-                            isProgramTerlambat = true;
-                        }
+                        if (forecastEndMs && planEndMs && forecastEndMs > planEndMs) isProgramTerlambat = true;
+                        if (!pengadaanSelesai && forecastEndMs && todayMs > forecastEndMs) isProgramTerlambat = true;
                     }
 
                     if (semuaTahapanSelesai) {
@@ -231,25 +183,22 @@ export const gubernurController = {
                 }
 
                 return {
-                    id: program.id,
-                    namaProgram: program.namaProgram,
-                    slug: program.slug,
-                    anggaran: calculatedAnggaran,
-                    status: program.status,
-                    isPrioritas: program.isPrioritas,
-                    createdAt: program.createdAt,
+                    id: program.id, namaProgram: program.namaProgram, slug: program.slug,
+                    anggaran: calculatedAnggaran, status: program.status,
+                    isPrioritas: program.isPrioritas, createdAt: program.createdAt,
                     pengadaanList: program.pengadaan.map(p => p.pengadaan.namaPengadaan),
-                    isSelesai: semuaTahapanSelesai,
-                    isTerlambat: isProgramTerlambat,
-                    tahapanSaatIni: currentTahapanNama,
-                    keteranganSaatIni: currentTahapanKeterangan
+                    isSelesai: semuaTahapanSelesai, isTerlambat: isProgramTerlambat,
+                    tahapanSaatIni: currentTahapanNama, keteranganSaatIni: currentTahapanKeterangan
                 };
             });
 
-            res.status(200).json({
+            const responseData = {
                 msg: `Berhasil mengambil daftar program untuk dinas: ${slug}`,
                 data: formattedPrograms
-            });
+            };
+
+            setCache(cacheKey, responseData, 30);
+            res.status(200).json(responseData);
 
         } catch (error) {
             console.error(`🔥 [GUBERNUR - GET PROGRAM ERROR]:`, error);
@@ -270,10 +219,7 @@ export const gubernurController = {
                         include: {
                             pengadaan: { select: { namaPengadaan: true } },
                             progresTahapan: {
-                                include: {
-                                    tahapan: true,
-                                    dokumen: true
-                                },
+                                include: { tahapan: true, dokumen: true },
                                 orderBy: { tahapan: { noUrut: 'asc' } }
                             }
                         }
@@ -312,44 +258,34 @@ export const gubernurController = {
                             forecastEndMs = addDaysMs(aktualStartMs, planDurDays);
                         } else {
                             forecastStartMs = prevEndDateMs !== null
-                                ? addDaysMs(prevEndDateMs, 1)
-                                : planStartMs;
+                                ? addDaysMs(prevEndDateMs, 1) : planStartMs;
                             forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                         }
-
                         prevEndDateMs = forecastEndMs;
                     }
 
                     return {
-                        idTahapan: p.tahapan.id,
-                        noUrut: p.tahapan.noUrut,
+                        idTahapan: p.tahapan.id, noUrut: p.tahapan.noUrut,
                         namaTahapan: p.tahapan.namaTahapan,
                         standarWaktuHari: p.tahapan.standarWaktuHari,
                         isWaktuEditable: p.tahapan.isWaktuEditable,
                         bobot: p.tahapan.bobot,
                         progres: {
-                            idProgres: p.id,
-                            status: p.status,
+                            idProgres: p.id, status: p.status,
                             planningTanggalMulai: p.planningTanggalMulai,
                             planningTanggalSelesai: p.planningTanggalSelesai,
                             aktualTanggalMulai: p.aktualTanggalMulai,
                             aktualTanggalSelesai: p.aktualTanggalSelesai,
-                            keterangan: p.keterangan,
-                            dokumenBukti: p.dokumen ?? [],
+                            keterangan: p.keterangan, dokumenBukti: p.dokumen ?? [],
                             updatedAt: p.updatedAt
                         },
                         forecast: {
-                            forecastTanggalMulai: forecastStartMs
-                                ? new Date(forecastStartMs).toISOString()
-                                : null,
-                            forecastTanggalSelesai: forecastEndMs
-                                ? new Date(forecastEndMs).toISOString()
-                                : null
+                            forecastTanggalMulai: forecastStartMs ? new Date(forecastStartMs).toISOString() : null,
+                            forecastTanggalSelesai: forecastEndMs ? new Date(forecastEndMs).toISOString() : null
                         }
                     };
                 });
 
-                // Ambil plan end & forecast end dari tahapan terakhir
                 const planEndMs = tahapanWithForecast.reduce((max, t) => {
                     const ms = getMidnightMs(t.progres.planningTanggalSelesai);
                     return ms && ms > max ? ms : max;
@@ -358,16 +294,12 @@ export const gubernurController = {
                 const lastForecast = tahapanWithForecast.at(-1)?.forecast.forecastTanggalSelesai;
 
                 return {
-                    id: transaksi.id,
-                    namaTransaksi: transaksi.namaTransaksi,
+                    id: transaksi.id, namaTransaksi: transaksi.namaTransaksi,
                     jenisPengadaan: transaksi.pengadaan.namaPengadaan,
-                    title: transaksi.title,
-                    anggaran: transaksi.anggaran,
+                    title: transaksi.title, anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
                     forecastKeseluruhan: {
-                        planTanggalSelesaiKeseluruhan: planEndMs
-                            ? new Date(planEndMs).toISOString()
-                            : null,
+                        planTanggalSelesaiKeseluruhan: planEndMs ? new Date(planEndMs).toISOString() : null,
                         forecastTanggalSelesaiKeseluruhan: lastForecast ?? null
                     },
                     tahapanList: tahapanWithForecast
@@ -377,14 +309,10 @@ export const gubernurController = {
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program (Gubernur Mode)",
                 data: {
-                    id: detailProgram.id,
-                    namaProgram: detailProgram.namaProgram,
-                    slug: detailProgram.slug,
-                    tanggalMulai: detailProgram.tanggalMulai,
-                    anggaran: calculatedTotalAnggaran,
-                    isPrioritas: detailProgram.isPrioritas,
-                    createdAt: detailProgram.createdAt,
-                    dinas: detailProgram.dinas,
+                    id: detailProgram.id, namaProgram: detailProgram.namaProgram,
+                    slug: detailProgram.slug, tanggalMulai: detailProgram.tanggalMulai,
+                    anggaran: calculatedTotalAnggaran, isPrioritas: detailProgram.isPrioritas,
+                    createdAt: detailProgram.createdAt, dinas: detailProgram.dinas,
                     dokumenProgram: detailProgram.dokumen,
                     pengadaanList: formattedPengadaanList
                 }
@@ -401,8 +329,7 @@ export const gubernurController = {
             const { slug } = req.params;
 
             const program = await prisma.program.findUnique({
-                where: { slug },
-                select: { id: true }
+                where: { slug }, select: { id: true }
             });
 
             if (!program) {

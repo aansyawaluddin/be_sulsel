@@ -34,17 +34,18 @@ export const authController = {
                 { expiresIn: '1d' }
             );
 
-            await prisma.accessToken.deleteMany({
-                where: { userId: user.id }
-            });
-
-            await prisma.accessToken.create({
-                data: {
-                    token: refreshToken,
-                    userId: user.id,
-                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-                }
-            });
+            await prisma.$transaction([
+                prisma.accessToken.deleteMany({
+                    where: { userId: user.id }
+                }),
+                prisma.accessToken.create({
+                    data: {
+                        token: refreshToken,
+                        userId: user.id,
+                        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+                    }
+                })
+            ]);
 
             res.cookie('refreshToken', refreshToken, {
                 httpOnly: true,
@@ -77,9 +78,7 @@ export const authController = {
             }
 
             await prisma.accessToken.deleteMany({
-                where: {
-                    token: refreshToken
-                }
+                where: { token: refreshToken }
             });
 
             res.clearCookie('refreshToken', {
