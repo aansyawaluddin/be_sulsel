@@ -4,6 +4,7 @@ import prisma from '../utils/prisma.js';
 import bcrypt from 'bcrypt';
 import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
 import { getCache, setCache, deleteCache, deleteCacheByPrefix } from '../utils/cache.js';
+import { logActivity } from '../utils/logger.js';
 
 export const masterStaffController = {
 
@@ -20,6 +21,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCache('dinasDropdown');
 
+            logActivity(req, 'CREATE DINAS', `Nama: ${namaDinas}`);
             res.status(201).json({ msg: "Berhasil membuat Dinas baru", data: dinasBaru });
         } catch (error) {
             res.status(500).json({ msg: error.message });
@@ -32,7 +34,10 @@ export const masterStaffController = {
 
             const cacheKey = `getDinas:${role}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json({ ...cached, user: { username, role } });
+            if (cached) {
+                logActivity(req, 'GET DINAS', 'dari cache');
+                return res.status(200).json({ ...cached, user: { username, role } });
+            }
 
             const dinasList = await prisma.dinas.findMany({
                 select: {
@@ -120,6 +125,7 @@ export const masterStaffController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET DINAS', `${dinasList.length} dinas`);
             res.status(200).json(responseData);
 
         } catch (error) {
@@ -144,6 +150,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCache('dinasDropdown');
 
+            logActivity(req, 'UPDATE DINAS', `ID: ${id} → Nama: ${namaDinas}`);
             res.status(200).json({ msg: "Dinas berhasil diupdate", data: dinasDiupdate });
         } catch (error) {
             res.status(500).json({ msg: error.message });
@@ -159,6 +166,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('dinasDropdown');
 
+            logActivity(req, 'DELETE DINAS', `ID: ${id}`);
             res.status(200).json({ msg: "Dinas berhasil dihapus" });
         } catch (error) {
             res.status(500).json({ msg: "Gagal menghapus dinas. Pastikan tidak ada data yang terikat." });
@@ -182,6 +190,7 @@ export const masterStaffController = {
             };
 
             setCache(cacheKey, response, 120);
+            logActivity(req, 'GET DINAS DROPDOWN');
             res.status(200).json(response);
         } catch (error) {
             console.error(`🔥 [MASTER - GET DINAS DROPDOWN ERROR]:`, error);
@@ -205,6 +214,7 @@ export const masterStaffController = {
 
             deleteCache('staffList');
 
+            logActivity(req, 'CREATE STAFF', `Username: ${username}`);
             res.status(201).json({
                 msg: "Berhasil membuat akun Staff",
                 data: { username: staffBaru.username, name: staffBaru.name }
@@ -218,7 +228,10 @@ export const masterStaffController = {
         try {
             const cacheKey = 'staffList';
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json(cached);
+            if (cached) {
+                logActivity(req, 'GET STAFF LIST', 'dari cache');
+                return res.status(200).json(cached);
+            }
 
             const staffList = await prisma.user.findMany({
                 where: { role: 'staff' },
@@ -230,6 +243,7 @@ export const masterStaffController = {
 
             const response = { msg: "Berhasil mengambil data staff", data: staffList };
             setCache(cacheKey, response, 60);
+            logActivity(req, 'GET STAFF LIST', `${staffList.length} staff`);
             res.status(200).json(response);
         } catch (error) {
             res.status(500).json({ msg: error.message });
@@ -252,6 +266,7 @@ export const masterStaffController = {
                 return res.status(404).json({ msg: "Data Staff tidak ditemukan." });
             }
 
+            logActivity(req, 'GET DETAIL STAFF', `ID: ${id} | Username: ${detailStaff.username}`);
             res.status(200).json({ msg: "Berhasil mengambil detail data staff", data: detailStaff });
         } catch (error) {
             console.error(`🔥 [MASTER - GET DETAIL STAFF ERROR]:`, error);
@@ -290,6 +305,7 @@ export const masterStaffController = {
 
             deleteCache('staffList');
 
+            logActivity(req, 'UPDATE STAFF', `ID: ${id} | Username: ${staffDiupdate.username}`);
             res.status(200).json({ msg: "Data akun Staff berhasil diperbarui", data: staffDiupdate });
         } catch (error) {
             console.error(`🔥 [UPDATE STAFF ERROR]:`, error);
@@ -307,6 +323,7 @@ export const masterStaffController = {
 
             deleteCache('staffList');
 
+            logActivity(req, 'DELETE STAFF', `ID: ${id}`);
             res.status(200).json({ msg: "Akun Staff berhasil dihapus" });
         } catch (error) {
             res.status(500).json({ msg: error.message });
@@ -326,6 +343,7 @@ export const masterStaffController = {
 
             const response = { msg: "Berhasil mengambil data master pengadaan", data: pengadaanList };
             setCache(cacheKey, response, 300);
+            logActivity(req, 'GET PENGADAAN');
             res.status(200).json(response);
         } catch (error) {
             console.error(`🔥 [MASTER - GET PENGADAAN ERROR]:`, error);
@@ -416,6 +434,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('inbox');
 
+            logActivity(req, 'CREATE PROGRAM PRIORITAS', `Nama: ${namaProgram}`);
             res.status(201).json({
                 msg: "Program Prioritas dan jadwal pengadaan berhasil dibuat oleh Master Staff!",
                 data: result
@@ -450,6 +469,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('inbox');
 
+            logActivity(req, 'UPDATE PROGRAM', `ID: ${id} → Nama: ${namaProgram}`);
             res.status(200).json({ msg: "Berhasil mengubah nama program (Master Mode).", data: programDiupdate });
         } catch (error) {
             console.error(`🔥 [MASTER - UPDATE PROGRAM ERROR]:`, error);
@@ -463,7 +483,10 @@ export const masterStaffController = {
 
             const cacheKey = `getProgram:master:${slug}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json(cached);
+            if (cached) {
+                logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | dari cache`);
+                return res.status(200).json(cached);
+            }
 
             const programList = await prisma.program.findMany({
                 where: { dinas: { slug } },
@@ -529,6 +552,7 @@ export const masterStaffController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | ${programList.length} program`);
             res.status(200).json(responseData);
         } catch (error) {
             console.error(`🔥 [MASTER - GET PROGRAM ERROR]:`, error);
@@ -561,6 +585,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('inbox');
 
+            logActivity(req, 'DELETE PROGRAM DITERIMA', `Slug: ${slug} | Nama: ${programTarget.namaProgram}`);
             res.status(200).json({
                 msg: `Program '${programTarget.namaProgram}' berhasil dihapus secara permanen.`
             });
@@ -587,6 +612,7 @@ export const masterStaffController = {
 
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'TOGGLE LOCK PLANNING', `Slug: ${slug} → ${statusBaru ? 'DIKUNCI' : 'DIBUKA'}`);
             res.status(200).json({
                 msg: `Jadwal Planning untuk '${programDiupdate.namaProgram}' telah ${statusBaru ? 'DIKUNCI' : 'DIBUKA'}.`,
                 data: programDiupdate
@@ -650,7 +676,6 @@ export const masterStaffController = {
                                 ? addDaysMs(prevEndDateMs, 1) : planStartMs;
                             forecastEndMs = addDaysMs(forecastStartMs, planDurDays);
                         }
-
                         prevEndDateMs = forecastEndMs;
                     }
 
@@ -698,6 +723,7 @@ export const masterStaffController = {
                 };
             });
 
+            logActivity(req, 'GET DETAIL PROGRAM', `Program: ${slug}`);
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program (Master Mode)",
                 data: {
@@ -733,6 +759,7 @@ export const masterStaffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
+            logActivity(req, 'GET DOKUMEN PROGRAM', `Program: ${slug}`);
             res.status(200).json({ msg: "Berhasil mengambil daftar dokumen program", data: dokumenList });
         } catch (error) {
             console.error(`🔥 [MASTER - GET DOKUMEN PROGRAM ERROR]:`, error);
@@ -815,6 +842,7 @@ export const masterStaffController = {
 
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'UPDATE PLANNING TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({
                 msg: `Berhasil mengatur ulang jadwal planning (Master Mode)`,
                 data: result
@@ -903,6 +931,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'UPDATE AKTUAL TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({ msg: `Berhasil menyimpan data aktual (Master Mode).`, data: result });
         } catch (error) {
             console.error(`🔥 [MASTER - UPDATE AKTUAL ERROR]:`, error);
@@ -931,6 +960,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'SELESAIKAN TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({
                 msg: "Tahapan berhasil diselesaikan dan dikunci (Master Mode).",
                 data: progresDikunci
@@ -970,6 +1000,7 @@ export const masterStaffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
+            logActivity(req, 'UPLOAD DOKUMEN PROGRAM', `Slug: ${slug} | ${req.files.length} file`);
             res.status(201).json({ msg: "Berhasil mengunggah dokumen program (Master Mode)", data: dokumenTerbaru });
         } catch (error) {
             console.error(`🔥 [MASTER - UPLOAD DOKUMEN PROGRAM ERROR]:`, error);
@@ -981,7 +1012,10 @@ export const masterStaffController = {
         try {
             const cacheKey = 'inbox';
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json(cached);
+            if (cached) {
+                logActivity(req, 'GET INBOX', 'dari cache');
+                return res.status(200).json(cached);
+            }
 
             const inboxList = await prisma.program.findMany({
                 select: {
@@ -1013,6 +1047,7 @@ export const masterStaffController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET INBOX', `${inboxList.length} program`);
             res.status(200).json(responseData);
         } catch (error) {
             console.error(`🔥 [MASTER - GET INBOX ERROR]:`, error);
@@ -1044,6 +1079,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('inbox');
 
+            logActivity(req, 'TERIMA PROGRAM', `Slug: ${slug} | Nama: ${programDiterima.namaProgram}`);
             res.status(200).json({
                 msg: `Program '${programDiterima.namaProgram}' dari ${programDiterima.dinas.namaDinas} berhasil diterima!`,
                 data: programDiterima
@@ -1078,6 +1114,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCache('inbox');
 
+            logActivity(req, 'TOLAK PROGRAM', `Slug: ${slug} | Nama: ${programTarget.namaProgram}`);
             res.status(200).json({
                 msg: `Program '${programTarget.namaProgram}' dari ${programTarget.dinas?.namaDinas || 'Tidak Diketahui'} telah DITOLAK dan DIHAPUS.`,
                 data: { namaProgram: programTarget.namaProgram, status: 'ditolak_dan_dihapus' }
@@ -1098,13 +1135,10 @@ export const masterStaffController = {
             }
 
             const programEksis = await prisma.program.findUnique({
-                where: { slug },
-                include: { dinas: true }
+                where: { slug }, include: { dinas: true }
             });
 
-            if (!programEksis) {
-                return res.status(404).json({ msg: "Program tidak ditemukan." });
-            }
+            if (!programEksis) return res.status(404).json({ msg: "Program tidak ditemukan." });
 
             if (programEksis.status !== 'terima') {
                 return res.status(400).json({
@@ -1144,8 +1178,7 @@ export const masterStaffController = {
                     });
 
                     let estimasiTanggalMulai = item.tanggalMulai
-                        ? new Date(item.tanggalMulai)
-                        : new Date();
+                        ? new Date(item.tanggalMulai) : new Date();
 
                     if (!item.tanggalMulai) {
                         estimasiTanggalMulai.setDate(estimasiTanggalMulai.getDate() + 1);
@@ -1164,8 +1197,7 @@ export const masterStaffController = {
                         tanggalSelesaiSekarang.setDate(tanggalSelesaiSekarang.getDate() + durasiHari);
 
                         dataProgres.push({
-                            transaksiId: transaksi.id,
-                            tahapanId: tahapan.id,
+                            transaksiId: transaksi.id, tahapanId: tahapan.id,
                             status: 'on_progress',
                             planningTanggalMulai: tanggalMulaiSekarang,
                             planningTanggalSelesai: tanggalSelesaiSekarang
@@ -1194,6 +1226,7 @@ export const masterStaffController = {
             deleteCacheByPrefix('getProgram:');
             deleteCacheByPrefix('getDinas:');
 
+            logActivity(req, 'TAMBAH PENGADAAN PROGRAM', `Slug: ${slug} | ${result.length} pengadaan baru`);
             res.status(201).json({
                 msg: `Berhasil menambahkan ${result.length} pengadaan baru ke program '${programEksis.namaProgram}'.`,
                 data: result

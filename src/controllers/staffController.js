@@ -3,6 +3,7 @@ import path from 'path';
 import prisma from '../utils/prisma.js';
 import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
 import { getCache, setCache, deleteCacheByPrefix } from '../utils/cache.js';
+import { logActivity } from '../utils/logger.js';
 
 export const staffController = {
 
@@ -12,7 +13,10 @@ export const staffController = {
 
             const cacheKey = `getDinas:${role}:${dinasId ?? 'all'}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json({ ...cached, user: { username, role } });
+            if (cached) {
+                logActivity(req, 'GET DINAS', 'dari cache');
+                return res.status(200).json({ ...cached, user: { username, role } });
+            }
 
             const dinasList = await prisma.dinas.findMany({
                 where: role === 'staff' ? { id: dinasId } : {},
@@ -101,6 +105,7 @@ export const staffController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET DINAS', `${dinasList.length} dinas`);
             res.status(200).json(responseData);
 
         } catch (error) {
@@ -122,6 +127,7 @@ export const staffController = {
 
             const response = { msg: "Berhasil mengambil data master pengadaan", data: pengadaanList };
             setCache(cacheKey, response, 300);
+            logActivity(req, 'GET PENGADAAN');
             res.status(200).json(response);
         } catch (error) {
             console.error(`🔥 [GET PENGADAAN ERROR]:`, error);
@@ -207,6 +213,7 @@ export const staffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'CREATE PROGRAM', `Nama: ${namaProgram}`);
             res.status(201).json({ msg: "Program dan seluruh jadwal pengadaan berhasil dibuat!", data: result });
         } catch (error) {
             console.error(`🔥 [CREATE PROGRAM ERROR]:`, error);
@@ -222,7 +229,10 @@ export const staffController = {
 
             const cacheKey = `getProgram:staff:${slug}:${dinasId}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json(cached);
+            if (cached) {
+                logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | dari cache`);
+                return res.status(200).json(cached);
+            }
 
             const filter = {};
 
@@ -324,6 +334,7 @@ export const staffController = {
 
             const responseData = { msg: "Berhasil mengambil daftar program", data: formattedPrograms };
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | ${programList.length} program`);
             res.status(200).json(responseData);
 
         } catch (error) {
@@ -425,6 +436,7 @@ export const staffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'UPDATE PROGRAM', `ID: ${id}`);
             res.status(200).json({ msg: "Berhasil memperbarui data program secara keseluruhan.", data: result });
         } catch (error) {
             console.error(`🔥 [STAFF - UPDATE PROGRAM ERROR]:`, error);
@@ -454,6 +466,7 @@ export const staffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'DELETE PROGRAM', `ID: ${id} | Nama: ${programEksis.namaProgram}`);
             res.status(200).json({ msg: `Program '${programEksis.namaProgram}' berhasil dihapus.` });
         } catch (error) {
             console.error(`🔥 [STAFF - DELETE PROGRAM ERROR]:`, error);
@@ -578,6 +591,7 @@ export const staffController = {
                 };
             });
 
+            logActivity(req, 'GET DETAIL PROGRAM', `Program: ${slug}`);
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program beserta hasil forecast",
                 data: {
@@ -685,6 +699,7 @@ export const staffController = {
 
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'UPDATE PLANNING TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({
                 msg: `Berhasil mengatur ulang jadwal planning. Jadwal tahapan selanjutnya telah disesuaikan otomatis.`,
                 data: result
@@ -780,6 +795,7 @@ export const staffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'UPDATE AKTUAL TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({ msg: `Berhasil menyimpan data aktual.`, data: result });
         } catch (error) {
             console.error(`🔥 [UPDATE AKTUAL ERROR]:`, error);
@@ -816,6 +832,7 @@ export const staffController = {
             deleteCacheByPrefix('getDinas:');
             deleteCacheByPrefix('getProgram:');
 
+            logActivity(req, 'SELESAIKAN TAHAPAN', `ProgresID: ${progresId}`);
             res.status(200).json({
                 msg: "Tahapan berhasil diselesaikan dan dikunci. Data pada tahapan ini tidak dapat diubah lagi.",
                 data: progresDikunci
@@ -863,6 +880,7 @@ export const staffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
+            logActivity(req, 'UPLOAD DOKUMEN PROGRAM', `Slug: ${slug} | ${req.files.length} file`);
             res.status(201).json({ msg: "Berhasil mengunggah dokumen program", data: dokumenTerbaru });
         } catch (error) {
             console.error(`🔥 [UPLOAD DOKUMEN PROGRAM ERROR]:`, error);
@@ -893,6 +911,7 @@ export const staffController = {
                 orderBy: { createdAt: 'desc' }
             });
 
+            logActivity(req, 'GET DOKUMEN PROGRAM', `Slug: ${slug}`);
             res.status(200).json({ msg: "Berhasil mengambil daftar dokumen program", data: dokumenList });
         } catch (error) {
             console.error(`🔥 [GET DOKUMEN PROGRAM ERROR]:`, error);

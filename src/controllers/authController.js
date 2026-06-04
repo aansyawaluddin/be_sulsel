@@ -25,19 +25,13 @@ export const authController = {
             );
 
             const refreshToken = jwt.sign(
-                {
-                    id: user.id,
-                    role: user.role,
-                    jti: crypto.randomUUID()
-                },
+                { id: user.id, role: user.role, jti: crypto.randomUUID() },
                 process.env.JWT_REFRESH_SECRET,
                 { expiresIn: '1d' }
             );
 
             await prisma.$transaction([
-                prisma.accessToken.deleteMany({
-                    where: { userId: user.id }
-                }),
+                prisma.accessToken.deleteMany({ where: { userId: user.id } }),
                 prisma.accessToken.create({
                     data: {
                         token: refreshToken,
@@ -52,7 +46,7 @@ export const authController = {
                 maxAge: 24 * 60 * 60 * 1000
             });
 
-            console.log(`✅ [LOGIN SUCCESS] User '${user.username}' (Dinas: ${user.dinasId})`);
+            console.log(`✅ [${new Date().toISOString()}] [LOGIN] '${user.username}' (Role: ${user.role}, Dinas: ${user.dinasId})`);
 
             res.json({
                 accessToken,
@@ -73,19 +67,13 @@ export const authController = {
         try {
             const refreshToken = req.cookies.refreshToken;
 
-            if (!refreshToken) {
-                return res.status(204).send();
-            }
+            if (!refreshToken) return res.status(204).send();
 
-            await prisma.accessToken.deleteMany({
-                where: { token: refreshToken }
-            });
+            await prisma.accessToken.deleteMany({ where: { token: refreshToken } });
 
-            res.clearCookie('refreshToken', {
-                httpOnly: true,
-            });
+            res.clearCookie('refreshToken', { httpOnly: true });
 
-            console.log(`✅ [LOGOUT SUCCESS] Token berhasil dihapus`);
+            console.log(`✅ [${new Date().toISOString()}] [LOGOUT] Token berhasil dihapus`);
 
             res.status(200).json({ msg: "Berhasil logout" });
 

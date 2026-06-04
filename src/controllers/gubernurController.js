@@ -1,6 +1,7 @@
 import prisma from '../utils/prisma.js';
 import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
 import { getCache, setCache } from '../utils/cache.js';
+import { logActivity } from '../utils/logger.js';
 
 export const gubernurController = {
 
@@ -10,7 +11,10 @@ export const gubernurController = {
 
             const cacheKey = `getDinas:${role}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json({ ...cached, user: { username, role } });
+            if (cached) {
+                logActivity(req, 'GET DINAS', 'dari cache');
+                return res.status(200).json({ ...cached, user: { username, role } });
+            }
 
             const dinasList = await prisma.dinas.findMany({
                 select: {
@@ -98,6 +102,7 @@ export const gubernurController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET DINAS', `${dinasList.length} dinas`);
             res.status(200).json(responseData);
 
         } catch (error) {
@@ -112,7 +117,10 @@ export const gubernurController = {
 
             const cacheKey = `getProgram:gubernur:${slug}`;
             const cached = getCache(cacheKey);
-            if (cached) return res.status(200).json(cached);
+            if (cached) {
+                logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | dari cache`);
+                return res.status(200).json(cached);
+            }
 
             const programList = await prisma.program.findMany({
                 where: { dinas: { slug } },
@@ -198,6 +206,7 @@ export const gubernurController = {
             };
 
             setCache(cacheKey, responseData, 30);
+            logActivity(req, 'GET PROGRAM', `Dinas: ${slug} | ${programList.length} program`);
             res.status(200).json(responseData);
 
         } catch (error) {
@@ -276,12 +285,15 @@ export const gubernurController = {
                             planningTanggalSelesai: p.planningTanggalSelesai,
                             aktualTanggalMulai: p.aktualTanggalMulai,
                             aktualTanggalSelesai: p.aktualTanggalSelesai,
-                            keterangan: p.keterangan, dokumenBukti: p.dokumen ?? [],
+                            keterangan: p.keterangan,
+                            dokumenBukti: p.dokumen ?? [],
                             updatedAt: p.updatedAt
                         },
                         forecast: {
-                            forecastTanggalMulai: forecastStartMs ? new Date(forecastStartMs).toISOString() : null,
-                            forecastTanggalSelesai: forecastEndMs ? new Date(forecastEndMs).toISOString() : null
+                            forecastTanggalMulai: forecastStartMs
+                                ? new Date(forecastStartMs).toISOString() : null,
+                            forecastTanggalSelesai: forecastEndMs
+                                ? new Date(forecastEndMs).toISOString() : null
                         }
                     };
                 });
@@ -299,13 +311,15 @@ export const gubernurController = {
                     title: transaksi.title, anggaran: transaksi.anggaran,
                     createdAt: transaksi.createdAt,
                     forecastKeseluruhan: {
-                        planTanggalSelesaiKeseluruhan: planEndMs ? new Date(planEndMs).toISOString() : null,
+                        planTanggalSelesaiKeseluruhan: planEndMs
+                            ? new Date(planEndMs).toISOString() : null,
                         forecastTanggalSelesaiKeseluruhan: lastForecast ?? null
                     },
                     tahapanList: tahapanWithForecast
                 };
             });
 
+            logActivity(req, 'GET DETAIL PROGRAM', `Program: ${slug}`);
             res.status(200).json({
                 msg: "Berhasil mengambil detail informasi program (Gubernur Mode)",
                 data: {
@@ -341,6 +355,7 @@ export const gubernurController = {
                 orderBy: { createdAt: 'desc' }
             });
 
+            logActivity(req, 'GET DOKUMEN PROGRAM', `Program: ${slug}`);
             res.status(200).json({
                 msg: "Berhasil mengambil daftar dokumen program",
                 data: dokumenList
