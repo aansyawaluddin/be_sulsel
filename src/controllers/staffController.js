@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import prisma from '../utils/prisma.js';
+import bcrypt from 'bcrypt';
 import { DAY_MS, getMidnightMs, addDaysMs, hitungForecastPengadaan } from '../utils/dateHelper.js';
 import { getCache, setCache, deleteCacheByPrefix } from '../utils/cache.js';
 import { logActivity } from '../utils/logger.js';
@@ -40,15 +41,14 @@ export const staffController = {
                 if (!passwordLama) {
                     return res.status(400).json({ msg: "Password lama wajib diisi untuk mengganti password." });
                 }
-                const bcrypt = await import('bcrypt');
-                const passwordCocok = await bcrypt.default.compare(passwordLama, user.password);
+                const passwordCocok = await bcrypt.compare(passwordLama, user.password);
                 if (!passwordCocok) {
                     return res.status(401).json({ msg: "Password lama tidak sesuai." });
                 }
                 if (passwordBaru.length < 6) {
                     return res.status(400).json({ msg: "Password baru minimal 6 karakter." });
                 }
-                dataUpdate.password = await bcrypt.default.hash(passwordBaru, 10);
+                dataUpdate.password = await bcrypt.hash(passwordBaru, 10);
             }
 
             const userDiupdate = await prisma.user.update({
@@ -57,12 +57,10 @@ export const staffController = {
                 select: { id: true, username: true, name: true, role: true, updatedAt: true }
             });
 
-            await prisma.accessToken.updateMany({
-                where: { userId, revoked: false },
-                data: { revoked: true }
-            });
+            await prisma.accessToken.deleteMany({ where: { userId } });
+            res.clearCookie('refreshToken', { httpOnly: true });
 
-            logActivity(req, 'UPDATE PROFILE', `UserID: ${userId}`);
+            logActivity(req, 'UPDATE PROFILE', `UserID: ${userId} | Role: ${user.role}`);
             res.status(200).json({
                 msg: "Profil berhasil diperbarui. Silakan login ulang dengan kredensial baru.",
                 data: userDiupdate

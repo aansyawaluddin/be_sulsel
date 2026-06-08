@@ -4,10 +4,10 @@ import { staffController } from '../controllers/staffController.js';
 import { uploadDokumen } from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
-
 router.use(verifyToken);
 router.use(verifyProgramAccess);
 
+// Profile
 router.patch('/profile', staffController.updateProfile);
 
 // Dinas
@@ -22,7 +22,7 @@ router.get('/pengadaan', staffController.getPengadaan);
 // Buat Program
 router.post('/program', staffController.createProgram);
 
-// Edit Nama Program
+// Edit Program
 router.patch('/program/:id', staffController.updateProgram);
 
 // Hapus Program

@@ -8,6 +8,70 @@ import { logActivity } from '../utils/logger.js';
 
 export const masterStaffController = {
 
+    updateProfile: async (req, res) => {
+        try {
+            const { username, passwordLama, passwordBaru } = req.body;
+            const userId = req.user.id;
+
+            if (!username && !passwordBaru) {
+                return res.status(400).json({
+                    msg: "Tidak ada perubahan yang dikirim. Isi username baru atau password baru."
+                });
+            }
+
+            const user = await prisma.user.findUnique({ where: { id: userId } });
+            if (!user) return res.status(404).json({ msg: "User tidak ditemukan." });
+
+            const dataUpdate = {};
+
+            if (username) {
+                if (username.trim().length < 3) {
+                    return res.status(400).json({ msg: "Username minimal 3 karakter." });
+                }
+                const usernameExist = await prisma.user.findFirst({
+                    where: { username: username.trim(), NOT: { id: userId } }
+                });
+                if (usernameExist) {
+                    return res.status(409).json({ msg: "Username sudah digunakan oleh akun lain." });
+                }
+                dataUpdate.username = username.trim();
+            }
+
+            if (passwordBaru) {
+                if (!passwordLama) {
+                    return res.status(400).json({ msg: "Password lama wajib diisi untuk mengganti password." });
+                }
+                const passwordCocok = await bcrypt.compare(passwordLama, user.password);
+                if (!passwordCocok) {
+                    return res.status(401).json({ msg: "Password lama tidak sesuai." });
+                }
+                if (passwordBaru.length < 6) {
+                    return res.status(400).json({ msg: "Password baru minimal 6 karakter." });
+                }
+                dataUpdate.password = await bcrypt.hash(passwordBaru, 10);
+            }
+
+            const userDiupdate = await prisma.user.update({
+                where: { id: userId },
+                data: dataUpdate,
+                select: { id: true, username: true, name: true, role: true, updatedAt: true }
+            });
+
+            await prisma.accessToken.deleteMany({ where: { userId } });
+            res.clearCookie('refreshToken', { httpOnly: true });
+
+            logActivity(req, 'UPDATE PROFILE', `UserID: ${userId} | Role: ${user.role}`);
+            res.status(200).json({
+                msg: "Profil berhasil diperbarui. Silakan login ulang dengan kredensial baru.",
+                data: userDiupdate
+            });
+
+        } catch (error) {
+            console.error(`🔥 [UPDATE PROFILE ERROR]:`, error);
+            res.status(500).json({ msg: error.message || "Terjadi kesalahan internal server" });
+        }
+    },
+
     createDinas: async (req, res) => {
         try {
             const { namaDinas } = req.body;
