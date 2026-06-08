@@ -8,6 +8,8 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(verifyProgramAccess);
 
+router.patch('/profile', staffController.updateProfile);
+
 // Dinas
 router.get('/dinas', staffController.getDinas);
 
